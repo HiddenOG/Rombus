@@ -48,3 +48,6 @@ yarn-debug.log*
 
 # OS
 Thumbs.db
+
+# Test cache
+.pytest_cache/

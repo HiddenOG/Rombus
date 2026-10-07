@@ -2,11 +2,11 @@
 
 import pandas as pd
 from typing import Dict, Any
-from app.tools import register_tool, validate_column
+from app.tools import register_tool, validate_column, COLUMN
 from app.session import DataSession
 
 
-@register_tool("acquire_iris_data")
+@register_tool("acquire_iris_data", "Replace the current dataset with the classic Iris dataset from the UCI repository.")
 def acquire_iris_data(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Load the Iris dataset from UCI repository."""
     url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/iris/iris.data'
@@ -21,7 +21,12 @@ def acquire_iris_data(session: DataSession, args: Dict[str, Any]) -> Dict[str, A
     }
 
 
-@register_tool("select_target")
+@register_tool(
+    "select_target",
+    "Set the target/label column to predict. Infers classification vs regression.",
+    {"column": COLUMN},
+    ["column"],
+)
 def select_target(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Set the target column for modeling."""
     col = args.get("column")
@@ -40,7 +45,11 @@ def select_target(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-@register_tool("preview_data")
+@register_tool(
+    "preview_data",
+    "Preview the first N rows of the dataset.",
+    {"rows": {"type": "integer", "description": "Number of rows (default 5)."}},
+)
 def preview_data(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Preview first N rows of the dataset."""
     rows = args.get("rows", 5)
@@ -52,7 +61,7 @@ def preview_data(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-@register_tool("get_data_info")
+@register_tool("get_data_info", "Show dtypes, non-null counts and descriptive statistics (df.info + df.describe).")
 def get_data_info(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Get comprehensive data info and descriptive statistics."""
     import io

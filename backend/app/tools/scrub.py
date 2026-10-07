@@ -4,11 +4,14 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Any
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from app.tools import register_tool, validate_column
+from app.tools import register_tool, validate_column, categorical_columns, COLUMN, COLUMNS
 from app.session import DataSession
 
+STRATEGY = {"type": "string", "enum": ["mean", "median", "mode"]}
+ENCODING = {"type": "string", "enum": ["label", "onehot"]}
 
-@register_tool("remove_columns")
+
+@register_tool("remove_columns", "Drop one or more columns.", {"columns": COLUMNS}, ["columns"])
 def remove_columns(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Remove specified columns from the dataset."""
     cols = args.get("columns", [])
@@ -29,7 +32,7 @@ def remove_columns(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]
     return {"success": True, "message": msg}
 
 
-@register_tool("check_duplicates")
+@register_tool("check_duplicates", "Count duplicate rows.")
 def check_duplicates(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Check for duplicate rows."""
     dup_count = int(session.df.duplicated().sum())
@@ -40,7 +43,7 @@ def check_duplicates(session: DataSession, args: Dict[str, Any]) -> Dict[str, An
     }
 
 
-@register_tool("remove_duplicates")
+@register_tool("remove_duplicates", "Remove duplicate rows.")
 def remove_duplicates(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Remove duplicate rows."""
     session.save_snapshot()
@@ -54,7 +57,12 @@ def remove_duplicates(session: DataSession, args: Dict[str, Any]) -> Dict[str, A
     }
 
 
-@register_tool("clean_numeric_string")
+@register_tool(
+    "clean_numeric_string",
+    "Strip $, commas and other non-numeric characters from a column and convert it to numeric.",
+    {"column": COLUMN},
+    ["column"],
+)
 def clean_numeric_string(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Clean a column by removing non-numeric characters and converting to numeric."""
     col = args.get("column")
@@ -76,7 +84,7 @@ def clean_numeric_string(session: DataSession, args: Dict[str, Any]) -> Dict[str
     }
 
 
-@register_tool("standardize_text")
+@register_tool("standardize_text", "Lowercase and strip whitespace in a text column.", {"column": COLUMN}, ["column"])
 def standardize_text(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Standardize text column: lowercase, strip whitespace."""
     col = args.get("column")
@@ -92,7 +100,12 @@ def standardize_text(session: DataSession, args: Dict[str, Any]) -> Dict[str, An
     }
 
 
-@register_tool("impute_missing")
+@register_tool(
+    "impute_missing",
+    "Fill missing values in ONE column. mean/median need a numeric column.",
+    {"column": COLUMN, "strategy": STRATEGY},
+    ["column"],
+)
 def impute_missing(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Impute missing values in a column."""
     col = args.get("column")
@@ -132,7 +145,12 @@ def impute_missing(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
-@register_tool("encode_categorical")
+@register_tool(
+    "encode_categorical",
+    "Encode ONE categorical column with label or one-hot encoding.",
+    {"column": COLUMN, "method": ENCODING},
+    ["column"],
+)
 def encode_categorical(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Encode a categorical column using label or one-hot encoding."""
     col = args.get("column")
@@ -159,7 +177,11 @@ def encode_categorical(session: DataSession, args: Dict[str, Any]) -> Dict[str, 
     return {"success": True, "message": msg}
 
 
-@register_tool("scale_features")
+@register_tool(
+    "scale_features",
+    "Standard-scale the given numeric columns (all numeric features if none given).",
+    {"columns": COLUMNS},
+)
 def scale_features(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Scale numeric features using StandardScaler."""
     cols = args.get("columns", [])
@@ -188,7 +210,7 @@ def scale_features(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
-@register_tool("log_transform")
+@register_tool("log_transform", "Apply log1p to a skewed numeric column.", {"column": COLUMN}, ["column"])
 def log_transform(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Apply log1p transformation to reduce skewness."""
     col = args.get("column")
@@ -214,7 +236,11 @@ def log_transform(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
 # ── Batch tools (apply one change to ALL columns at once) ────────────────────
 
 
-@register_tool("impute_all_missing")
+@register_tool(
+    "impute_all_missing",
+    "Fill missing values in ALL columns at once. Without a strategy, uses mean for numeric and mode for categorical. Prefer this over repeated impute_missing calls.",
+    {"strategy": STRATEGY},
+)
 def impute_all_missing(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Impute missing values across ALL columns in one shot.
     
@@ -260,7 +286,11 @@ def impute_all_missing(session: DataSession, args: Dict[str, Any]) -> Dict[str, 
     }
 
 
-@register_tool("encode_all_categorical")
+@register_tool(
+    "encode_all_categorical",
+    "Encode ALL categorical columns at once (skips the target). Prefer this over repeated encode_categorical calls.",
+    {"method": ENCODING},
+)
 def encode_all_categorical(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Encode ALL remaining categorical (object/category) columns at once.
     
@@ -269,7 +299,7 @@ def encode_all_categorical(session: DataSession, args: Dict[str, Any]) -> Dict[s
     """
     method = args.get("method", "label")
 
-    cat_cols = session.df.select_dtypes(include=["object", "category"]).columns.tolist()
+    cat_cols = categorical_columns(session.df)
     # Skip target column
     if session.target_column and session.target_column in cat_cols:
         cat_cols.remove(session.target_column)
@@ -299,7 +329,7 @@ def encode_all_categorical(session: DataSession, args: Dict[str, Any]) -> Dict[s
     }
 
 
-@register_tool("scale_all_features")
+@register_tool("scale_all_features", "Standard-scale ALL numeric features at once (skips the target).")
 def scale_all_features(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Scale ALL numeric features at once using StandardScaler.
     

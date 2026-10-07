@@ -6,7 +6,7 @@ from app.session import DataSession
 from app.workflow_context import STAGES
 
 
-@register_tool("transition_stage")
+@register_tool("transition_stage", "Advance to the next ASEMIC stage.")
 def transition_stage(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Move to the next ASEMIC workflow stage."""
     try:
@@ -29,7 +29,7 @@ def transition_stage(session: DataSession, args: Dict[str, Any]) -> Dict[str, An
     }
 
 
-@register_tool("undo")
+@register_tool("undo", "Revert the last data transformation.")
 def undo(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Undo the last data transformation."""
     if not session.can_undo:

@@ -3,11 +3,16 @@
 import pandas as pd
 import numpy as np
 from typing import Dict, Any
-from app.tools import register_tool, validate_column
+from app.tools import register_tool, validate_column, COLUMN
 from app.session import DataSession
 
 
-@register_tool("plot_histogram")
+@register_tool(
+    "plot_histogram",
+    "Histogram of a numeric column, or value counts of a categorical one.",
+    {"column": COLUMN},
+    ["column"],
+)
 def plot_histogram(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Generate histogram data with bins for chart rendering."""
     col = args.get("column")
@@ -50,7 +55,7 @@ def plot_histogram(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
-@register_tool("plot_boxplot")
+@register_tool("plot_boxplot", "Box plot (quartiles, whiskers, outliers) of a numeric column.", {"column": COLUMN}, ["column"])
 def plot_boxplot(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Generate box plot statistics."""
     col = args.get("column")
@@ -88,7 +93,7 @@ def plot_boxplot(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-@register_tool("plot_correlation")
+@register_tool("plot_correlation", "Correlation heatmap of all numeric columns.")
 def plot_correlation(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Generate correlation matrix for numeric features."""
     numeric_df = session.df.select_dtypes(include=[np.number])
@@ -127,7 +132,12 @@ def plot_correlation(session: DataSession, args: Dict[str, Any]) -> Dict[str, An
     }
 
 
-@register_tool("plot_scatterplot")
+@register_tool(
+    "plot_scatterplot",
+    "Scatter plot of two columns, optionally colored by a third.",
+    {"x": COLUMN, "y": COLUMN, "hue": COLUMN},
+    ["x", "y"],
+)
 def plot_scatterplot(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Generate scatter plot data."""
     x_col = args.get("x")

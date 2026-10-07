@@ -20,7 +20,7 @@ from sklearn.metrics import (
     accuracy_score, f1_score, classification_report,
 )
 
-from app.tools import register_tool, validate_column
+from app.tools import register_tool, validate_column, categorical_columns
 from app.session import DataSession
 from app.config import settings
 
@@ -77,7 +77,20 @@ AUTOML_REGRESSION_GRIDS = {
 }
 
 
-@register_tool("train_test_split")
+ALGORITHM = {
+    "type": "string",
+    "description": "Algorithm key of a trained model (see train_models).",
+}
+
+
+@register_tool(
+    "train_test_split",
+    "Split the data into train and test sets. Requires a target column.",
+    {
+        "test_size": {"type": "number", "description": "Fraction for the test set (default 0.2)."},
+        "stratify": {"type": "boolean", "description": "Stratify by target (classification only)."},
+    },
+)
 def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Split data into training and test sets."""
     if not session.target_column:
@@ -92,7 +105,7 @@ def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str,
     y = session.df[session.target_column]
 
     # Handle non-numeric columns: warn and auto-encode
-    object_cols = X.select_dtypes(include=['object']).columns.tolist()
+    object_cols = categorical_columns(X)
     if object_cols:
         X = pd.get_dummies(X, columns=object_cols, drop_first=True)
 
@@ -112,7 +125,18 @@ def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str,
     return {"success": True, "message": msg}
 
 
-@register_tool("train_models")
+@register_tool(
+    "train_models",
+    "Train and cross-validate models. Classification algorithms: "
+    + ", ".join(CLASSIFICATION_MODELS) + ". Regression algorithms: " + ", ".join(REGRESSION_MODELS) + ".",
+    {
+        "algorithms": {
+            "type": "array",
+            "items": {"type": "string", "enum": sorted(set(CLASSIFICATION_MODELS) | set(REGRESSION_MODELS))},
+        },
+        "cv_folds": {"type": "integer", "description": "Cross-validation folds (default 5)."},
+    },
+)
 def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Train one or more ML models."""
     if session.X_train is None:
@@ -141,8 +165,8 @@ def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
             result = {"model": alg, "r2_score": score, "mae": mae, "rmse": rmse}
         else:
             acc = round(float(accuracy_score(session.y_test, y_pred)), 4)
-            f1 = round(float(f1_score(session.y_test, y_pred, average='weighted')), 4)
-            report = classification_report(session.y_test, y_pred)
+            f1 = round(float(f1_score(session.y_test, y_pred, average='weighted', zero_division=0)), 4)
+            report = classification_report(session.y_test, y_pred, zero_division=0)
             result = {"model": alg, "accuracy": acc, "f1_score": f1, "report": report}
 
         # Cross-validation
@@ -165,7 +189,7 @@ def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-@register_tool("auto_ml")
+@register_tool("auto_ml", "Grid-search several algorithms with hyperparameter tuning and report the best.")
 def auto_ml(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Automatically find the best model with hyperparameter tuning (AutoML)."""
     if session.X_train is None:
@@ -215,7 +239,15 @@ def auto_ml(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-@register_tool("predict")
+@register_tool(
+    "predict",
+    "Predict the target for one row of feature values using a trained model.",
+    {
+        "features": {"type": "object", "description": "Mapping of feature column name to value."},
+        "algorithm": ALGORITHM,
+    },
+    ["features"],
+)
 def predict(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Make a prediction using a trained model."""
     if not session.trained_models:
@@ -257,7 +289,7 @@ def predict(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-@register_tool("explain_model")
+@register_tool("explain_model", "Show which features drive a trained model's predictions.", {"algorithm": ALGORITHM})
 def explain_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Generate SHAP feature importance explanations."""
     if not session.trained_models:
@@ -325,7 +357,7 @@ def explain_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": False, "message": f"Could not explain model: {str(e)}"}
 
 
-@register_tool("save_model")
+@register_tool("save_model", "Save a trained model (with its preprocessing) to disk.", {"algorithm": ALGORITHM})
 def save_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Save a trained model to disk."""
     if not session.trained_models:
