@@ -5,7 +5,7 @@ An interactive, AI-powered AutoML platform that guides users through the complet
 ## Features
 
 - **ASEMIC Workflow** — Guided pipeline: Acquire → Scrub → Explore → Model → Interpret → Communicate
-- **AI Copilot** — Gemini-powered chat that suggests data science actions contextually
+- **AI Copilot** — Gemini-powered chat that suggests data science actions via native function calling (you click to run them)
 - **20+ ML Tools** — Data cleaning, encoding, scaling, EDA, model training, prediction
 - **AutoML Mode** — One-click best-model search with hyperparameter tuning
 - **Interactive Charts** — Histograms, boxplots, scatterplots, correlation heatmaps
@@ -16,8 +16,8 @@ An interactive, AI-powered AutoML platform that guides users through the complet
 ## Quick Start
 
 ### Prerequisites
-- Python 3.10+
-- Node.js 18+
+- Python 3.12+
+- Node.js 20.19+ (or 22.12+)
 - Google Gemini API key
 
 ### Backend
@@ -26,10 +26,12 @@ cd backend
 python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # Linux/Mac
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # or requirements.txt without test tools
 cp .env.example .env         # Edit with your API key
 python main.py
 ```
+
+Run the tests with `python -m pytest` from `backend/`.
 
 ### Frontend
 ```bash
