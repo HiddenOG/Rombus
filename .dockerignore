@@ -1,0 +1,16 @@
+node_modules
+venv
+.venv
+__pycache__
+*.pyc
+.git
+.gitignore
+.env
+*.pkl
+*.db
+data/
+dist/
+.vscode
+.idea
+*.md
+!README.md
