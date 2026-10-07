@@ -32,12 +32,13 @@ export function Sidebar({ sessionId, currentStage, summary, onFileUpload, isProc
                             <Database className="w-8 h-8 text-gray-300" />
                         </div>
                         <p className="text-sm text-gray-500 mb-4">Upload a dataset to begin</p>
-                        <label className="inline-flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl cursor-pointer hover:bg-indigo-700 transition-all text-sm font-medium shadow-lg shadow-indigo-100 hover:shadow-indigo-200">
+                        <label className={`inline-flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl transition-all text-sm font-medium shadow-lg shadow-indigo-100 ${isProcessing ? 'opacity-60 cursor-wait' : 'cursor-pointer hover:bg-indigo-700 hover:shadow-indigo-200'}`}>
                             <Upload className="w-4 h-4" />
-                            Upload CSV / Excel
+                            {isProcessing ? 'Uploading…' : 'Upload CSV / Excel'}
                             <input
                                 type="file"
                                 className="hidden"
+                                disabled={isProcessing}
                                 onChange={(e) => {
                                     const file = e.target.files[0];
                                     if (file) onFileUpload(file);

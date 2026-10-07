@@ -1,5 +1,5 @@
 /**
- * API Client — Axios instance with configurable base URL and interceptors.
+ * API Client — fetch wrapper with configurable base URL and error handling.
  */
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -34,7 +34,7 @@ async function apiRequest(endpoint, options = {}) {
         return data;
     } catch (error) {
         if (error.name === 'TypeError' && error.message.includes('fetch')) {
-            throw new Error('Cannot connect to server. Is the backend running?');
+            throw new Error('Cannot connect to server. Is the backend running?', { cause: error });
         }
         throw error;
     }

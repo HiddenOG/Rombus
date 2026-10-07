@@ -1,7 +1,7 @@
-# Frontend Dockerfile — Multi-stage Node build + Nginx
+﻿# Frontend Dockerfile â€” Multi-stage Node build + Nginx
 
 # Build stage
-FROM node:20-alpine as builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -15,7 +15,7 @@ ENV VITE_API_URL=$VITE_API_URL
 
 RUN npm run build
 
-# Production stage — Nginx
+# Production stage â€” Nginx
 FROM nginx:alpine
 
 # Copy custom nginx config
