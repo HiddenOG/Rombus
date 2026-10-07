@@ -42,7 +42,7 @@ export function ChatPanel({
             </div>
 
             {/* Messages — THIS is the scrollable area */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-5 bg-gradient-to-b from-gray-50/50 to-white custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-6 space-y-5 bg-linear-to-b from-gray-50/50 to-white custom-scrollbar">
                 {chatHistory.length === 0 && <EmptyState />}
 
                 {chatHistory.map((msg, i) => (
@@ -59,7 +59,7 @@ export function ChatPanel({
             {/* Error display */}
             {error && (
                 <div className="shrink-0 mx-6 mb-2 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-red-700 text-sm animate-in">
-                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    <AlertCircle className="w-4 h-4 shrink-0" />
                     <span className="flex-1">{error}</span>
                     <button
                         onClick={onClearError}
@@ -83,7 +83,7 @@ export function ChatPanel({
                                 : 'Upload a dataset to start'
                         }
                         disabled={!sessionId || isProcessing}
-                        className="w-full pl-5 pr-14 py-3.5 bg-gray-100 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all outline-none text-base placeholder:text-gray-400"
+                        className="w-full pl-5 pr-14 py-3.5 bg-gray-100 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all outline-hidden text-base placeholder:text-gray-400"
                     />
                     <button
                         type="submit"
@@ -110,7 +110,7 @@ export function ChatPanel({
 function EmptyState() {
     return (
         <div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-20">
-            <div className="w-24 h-24 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-indigo-50">
+            <div className="w-24 h-24 bg-linear-to-br from-indigo-100 to-purple-100 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-indigo-50">
                 <Brain className="w-12 h-12 text-indigo-600" />
             </div>
             <h2 className="text-3xl font-bold text-gray-800 mb-3">AutoML Copilot</h2>

@@ -12,7 +12,7 @@ export function ActionButton({ action, onExecute, isProcessing }) {
                 disabled={isProcessing}
                 className={`
                     flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold
-                    transition-all duration-200 shadow-sm
+                    transition-all duration-200 shadow-xs
                     ${isTransition
                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-600 hover:text-white hover:shadow-emerald-100'
                         : 'bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-600 hover:text-white hover:shadow-indigo-100'

@@ -26,13 +26,13 @@ export function StageProgress({ currentStage }) {
                         <div className="group relative">
                             <div
                                 className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${isCompleted
-                                        ? 'bg-emerald-500 shadow-sm shadow-emerald-200'
+                                        ? 'bg-emerald-500 shadow-xs shadow-emerald-200'
                                         : isCurrent
-                                            ? 'bg-indigo-500 shadow-sm shadow-indigo-200 ring-2 ring-indigo-200 animate-pulse'
+                                            ? 'bg-indigo-500 shadow-xs shadow-indigo-200 ring-2 ring-indigo-200 animate-pulse'
                                             : 'bg-gray-200'
                                     }`}
                             />
-                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-30">
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-sm opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-30">
                                 {STAGE_LABELS[s]}
                             </div>
                         </div>

@@ -175,7 +175,7 @@ function ModelResults({ results, bestModel }) {
                     )}
 
                     {r.report && (
-                        <pre className="mt-2 text-[9px] font-mono text-gray-600 bg-white p-2 rounded border overflow-x-auto">
+                        <pre className="mt-2 text-[9px] font-mono text-gray-600 bg-white p-2 rounded-sm border overflow-x-auto">
                             {r.report}
                         </pre>
                     )}

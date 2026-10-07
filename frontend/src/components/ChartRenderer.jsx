@@ -35,7 +35,7 @@ function HistogramChart({ data, title, xKey = 'bin', yKey = 'count' }) {
     const actualYKey = data[0]?.importance ? 'importance' : yKey;
 
     return (
-        <div className="mt-3 bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+        <div className="mt-3 bg-white rounded-xl border border-gray-100 p-4 shadow-xs">
             {title && <p className="text-xs font-bold text-gray-600 mb-3 uppercase tracking-wider">{title}</p>}
             <ResponsiveContainer width="100%" height={250}>
                 <BarChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
@@ -84,7 +84,7 @@ function BoxPlotDisplay({ data, title }) {
     const getPos = (val) => ((val - data.min) / (range || 1)) * 100;
 
     return (
-        <div className="mt-3 bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+        <div className="mt-3 bg-white rounded-xl border border-gray-100 p-4 shadow-xs">
             {title && <p className="text-xs font-bold text-gray-600 mb-3 uppercase tracking-wider">{title}</p>}
 
             {/* Visual box plot */}
@@ -96,7 +96,7 @@ function BoxPlotDisplay({ data, title }) {
                 />
                 {/* Box */}
                 <div
-                    className="absolute top-1 bottom-1 bg-indigo-100 border-2 border-indigo-400 rounded"
+                    className="absolute top-1 bottom-1 bg-indigo-100 border-2 border-indigo-400 rounded-sm"
                     style={{ left: `${getPos(data.q1)}%`, width: `${getPos(data.q3) - getPos(data.q1)}%` }}
                 />
                 {/* Median line */}
@@ -141,7 +141,7 @@ function CorrelationDisplay({ data, columns, title }) {
     };
 
     return (
-        <div className="mt-3 bg-white rounded-xl border border-gray-100 p-4 shadow-sm overflow-auto">
+        <div className="mt-3 bg-white rounded-xl border border-gray-100 p-4 shadow-xs overflow-auto">
             {title && <p className="text-xs font-bold text-gray-600 mb-3 uppercase tracking-wider">{title}</p>}
             <table className="text-[10px]">
                 <thead>
@@ -162,7 +162,7 @@ function CorrelationDisplay({ data, columns, title }) {
                             </td>
                             {columns.map(col => (
                                 <td key={col} className="px-1 py-0.5">
-                                    <div className={`px-1.5 py-0.5 rounded text-center font-mono font-bold ${getColor(data[row]?.[col] || 0)}`}>
+                                    <div className={`px-1.5 py-0.5 rounded-sm text-center font-mono font-bold ${getColor(data[row]?.[col] || 0)}`}>
                                         {(data[row]?.[col] || 0).toFixed(2)}
                                     </div>
                                 </td>
@@ -189,7 +189,7 @@ function ScatterPlot({ data, x, y, hue, title }) {
     }
 
     return (
-        <div className="mt-3 bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+        <div className="mt-3 bg-white rounded-xl border border-gray-100 p-4 shadow-xs">
             {title && <p className="text-xs font-bold text-gray-600 mb-3 uppercase tracking-wider">{title}</p>}
             <ResponsiveContainer width="100%" height={280}>
                 <ScatterChart margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>

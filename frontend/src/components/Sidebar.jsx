@@ -8,7 +8,7 @@ export function Sidebar({ sessionId, currentStage, summary, onFileUpload, isProc
     return (
         <div className="w-72 bg-white border-r border-gray-200 flex flex-col overflow-hidden">
             {/* Header */}
-            <div className="shrink-0 p-4 border-b border-gray-200 bg-gradient-to-br from-indigo-600 to-indigo-700 text-white">
+            <div className="shrink-0 p-4 border-b border-gray-200 bg-linear-to-br from-indigo-600 to-indigo-700 text-white">
                 <div className="flex items-center gap-2.5 mb-2">
                     <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
                         <Zap className="w-5 h-5" />
@@ -122,7 +122,7 @@ function ColumnCard({ col }) {
     const isSkewed = col.skewness != null && Math.abs(col.skewness) > 1;
 
     return (
-        <div className="p-2.5 bg-white border border-gray-100 rounded-xl shadow-sm text-sm hover:shadow-md transition-shadow">
+        <div className="p-2.5 bg-white border border-gray-100 rounded-xl shadow-xs text-sm hover:shadow-md transition-shadow">
             <div className="flex justify-between mb-1.5">
                 <span className="font-bold truncate max-w-[120px] text-gray-800" title={col.name}>
                     {col.name}

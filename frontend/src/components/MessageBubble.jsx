@@ -15,10 +15,10 @@ export function MessageBubble({ message, onAction, isProcessing }) {
         <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
             <div
                 className={`max-w-[80%] p-4 ${isUser
-                    ? 'bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-2xl rounded-tr-sm shadow-lg shadow-indigo-100'
+                    ? 'bg-linear-to-br from-indigo-600 to-indigo-700 text-white rounded-2xl rounded-tr-sm shadow-lg shadow-indigo-100'
                     : isSystem
                         ? 'bg-gray-100 text-gray-600 rounded-lg text-sm italic px-4 py-3'
-                        : 'bg-white border border-gray-200/80 shadow-sm rounded-2xl rounded-tl-sm'
+                        : 'bg-white border border-gray-200/80 shadow-xs rounded-2xl rounded-tl-sm'
                     }`}
             >
                 {/* AI role label */}
