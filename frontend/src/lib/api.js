@@ -64,6 +64,21 @@ export async function getSession(sessionId) {
     return apiRequest(`/api/session/${sessionId}`, { method: 'GET' });
 }
 
+export async function getCells(sessionId) {
+    return apiRequest(`/api/session/${sessionId}/cells`, { method: 'GET' });
+}
+
+export async function saveCells(sessionId, cells) {
+    return apiRequest(`/api/session/${sessionId}/cells`, {
+        method: 'PUT',
+        body: JSON.stringify({ cells }),
+    });
+}
+
+export async function deleteNotebook(sessionId) {
+    return apiRequest(`/api/session/${sessionId}`, { method: 'DELETE' });
+}
+
 export async function listSessions() {
     return apiRequest('/api/sessions', { method: 'GET' });
 }

@@ -12,3 +12,5 @@ pydantic-settings>=2.11
 python-dotenv>=1.2
 shap>=0.48
 pyarrow>=25
+sqlalchemy>=2.0
+# For a PostgreSQL / Supabase DATABASE_URL, also install: psycopg[binary]

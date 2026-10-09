@@ -1,11 +1,11 @@
 import React from 'react';
-import { Upload, FileSpreadsheet, Layers, Sparkles, Undo2, Lock, Target, Boxes, NotebookPen, Plus } from 'lucide-react';
+import { Upload, FileSpreadsheet, Layers, Sparkles, Undo2, Lock, Target, Boxes, NotebookPen, Plus, Trash2 } from 'lucide-react';
 import { Logo } from './Logo';
 
 /**
  * Sidebar — brand, dataset overview and column evidence panel.
  */
-export function Sidebar({ sessionId, summary, onFileUpload, isProcessing, notebooks = [], onOpenNotebook, onNewNotebook }) {
+export function Sidebar({ sessionId, summary, onFileUpload, isProcessing, notebooks = [], onOpenNotebook, onNewNotebook, onDeleteNotebook }) {
     return (
         <aside className="w-80 shrink-0 bg-surface border-r border-line flex flex-col overflow-hidden">
             {/* Brand */}
@@ -23,6 +23,7 @@ export function Sidebar({ sessionId, summary, onFileUpload, isProcessing, notebo
                     currentId={sessionId}
                     onOpen={onOpenNotebook}
                     onNew={onNewNotebook}
+                    onDelete={onDeleteNotebook}
                     disabled={isProcessing}
                 />
                 {!sessionId ? (
@@ -46,7 +47,13 @@ function timeAgo(seconds) {
     return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
 }
 
-function NotebookList({ notebooks, currentId, onOpen, onNew, disabled }) {
+function NotebookList({ notebooks, currentId, onOpen, onNew, onDelete, disabled }) {
+    const confirmDelete = (n) => {
+        if (window.confirm(`Delete the notebook "${n.filename}"? Its data, recipe and cells will be removed for good.`)) {
+            onDelete(n.session_id);
+        }
+    };
+
     return (
         <section>
             <div className="mb-2.5 flex items-center justify-between">
@@ -64,11 +71,11 @@ function NotebookList({ notebooks, currentId, onOpen, onNew, disabled }) {
             ) : (
                 <ul className="max-h-44 space-y-0.5 overflow-y-auto custom-scrollbar">
                     {notebooks.map(n => (
-                        <li key={n.session_id}>
+                        <li key={n.session_id} className="group relative">
                             <button
                                 onClick={() => onOpen(n.session_id)}
                                 disabled={disabled}
-                                className={`w-full rounded-lg px-2.5 py-1.5 text-left transition-colors ${
+                                className={`w-full rounded-lg px-2.5 py-1.5 pr-8 text-left transition-colors ${
                                     n.session_id === currentId ? 'bg-brand-50 text-brand-800' : 'text-ink-2 hover:bg-surface-2'
                                 }`}
                             >
@@ -76,6 +83,15 @@ function NotebookList({ notebooks, currentId, onOpen, onNew, disabled }) {
                                 <span className="block truncate text-[11px] text-ink-3">
                                     {n.target ? `predicting ${n.target} · ` : ''}{timeAgo(n.updated_at)}
                                 </span>
+                            </button>
+                            <button
+                                onClick={() => confirmDelete(n)}
+                                disabled={disabled}
+                                title="Delete notebook"
+                                aria-label={`Delete notebook ${n.filename}`}
+                                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-3 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-700 focus:opacity-100 group-hover:opacity-100"
+                            >
+                                <Trash2 className="h-3.5 w-3.5" />
                             </button>
                         </li>
                     ))}

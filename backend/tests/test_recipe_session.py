@@ -143,6 +143,21 @@ class TestRecipeAPI:
         # View actions (charts) create no step
         assert act("plot_histogram", column="age")["step"] is None
 
+    def test_cells_saved_and_notebook_deleted(self, client, tmp_path):
+        csv = b"x,label\n" + b"\n".join(f"{i},{i % 2}".encode() for i in range(10))
+        sid = client.post("/api/upload", files={"file": ("d.csv", csv, "text/csv")}).json()["session_id"]
+        cells = [{"id": "a1", "type": "note", "text": "hello"}]
+        assert client.put(f"/api/session/{sid}/cells", json={"cells": cells}).json()["success"]
+
+        # A fresh server (empty memory) reads the cells back from the database
+        from app.session import session_manager
+        session_manager._sessions.clear()
+        assert client.get(f"/api/session/{sid}/cells").json()["cells"] == cells
+
+        assert client.delete(f"/api/session/{sid}").json()["success"]
+        assert client.get(f"/api/session/{sid}").status_code == 404
+        assert not list(tmp_path.glob(f"{sid}*.parquet"))
+
     def test_tools_and_sessions_endpoints(self, client):
         tools = {t["name"]: t for t in client.get("/api/tools").json()["tools"]}
         assert tools["impute_missing"]["kind"] == "learn"

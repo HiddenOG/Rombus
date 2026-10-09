@@ -1,6 +1,6 @@
 """Recipe router — the notebook's backend: tools, notebooks, and editing recipe steps."""
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -44,6 +44,31 @@ async def list_tools():
 @router.get("/sessions")
 async def list_sessions(_: str = Depends(verify_api_key)):
     return {"sessions": session_manager.list_sessions()}
+
+
+class CellsUpdate(BaseModel):
+    cells: List[Dict[str, Any]]
+
+
+@router.get("/session/{session_id}/cells")
+async def get_cells(session_id: str, _: str = Depends(verify_api_key)):
+    return {"cells": _session(session_id).cells}
+
+
+@router.put("/session/{session_id}/cells")
+async def save_cells(session_id: str, body: CellsUpdate, _: str = Depends(verify_api_key)):
+    """The notebook's cells, saved with the notebook so any browser can reopen it."""
+    session = _session(session_id)
+    session.cells = body.cells
+    session_manager.save(session)
+    return {"success": True}
+
+
+@router.delete("/session/{session_id}")
+async def delete_notebook(session_id: str, _: str = Depends(verify_api_key)):
+    _session(session_id)  # 404 if it doesn't exist
+    session_manager.delete_session(session_id)
+    return {"success": True}
 
 
 @router.get("/session/{session_id}/recipe")

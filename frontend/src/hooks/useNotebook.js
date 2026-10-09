@@ -8,7 +8,8 @@
  *         an executed action; stepId links it to its recipe step (data-changing actions only),
  *         version records the data it was made from so views can be flagged when out of date.
  *
- * Cells are kept in localStorage per notebook (session), so a refresh doesn't lose them.
+ * Cells are saved on the server with the notebook, so any browser can reopen it. The browser
+ * only remembers which notebook was open last (and holds older cells for a one-time migration).
  * The recipe on the server stays the source of truth for what each step does.
  */
 
@@ -44,14 +45,22 @@ export function useNotebook() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [error, setError] = useState(null);
 
-    // Persist cells and the open notebook whenever they change. Skipped while no notebook is
-    // open, so the first render can't wipe "last open notebook" before it's restored.
+    // Remember which notebook is open. Skipped while none is open, so the first render can't
+    // wipe "last open notebook" before it's restored.
     useEffect(() => {
         if (!sessionId) return;
-        const store = loadStore();
-        store.current = sessionId;
-        store.cells[sessionId] = cells;
-        saveStore(store);
+        saveStore({ ...loadStore(), current: sessionId });
+    }, [sessionId]);
+
+    // Save cells to the server, waiting for a short pause so bursts of changes send once
+    useEffect(() => {
+        if (!sessionId) return undefined;
+        const timer = setTimeout(() => {
+            api.saveCells(sessionId, cells).catch(() => {
+                // Saving cells is best-effort; the recipe itself is already saved on the server
+            });
+        }, 600);
+        return () => clearTimeout(timer);
     }, [sessionId, cells]);
 
     const refreshNotebooks = useCallback(async () => {
@@ -65,10 +74,12 @@ export function useNotebook() {
     const openNotebook = useCallback(async (id) => {
         setError(null);
         try {
-            const data = await api.getSession(id);
+            const [data, saved] = await Promise.all([api.getSession(id), api.getCells(id)]);
+            // One-time migration: notebooks from before cells lived on the server
+            const legacy = loadStore().cells?.[id] || [];
             setSessionId(id);
             setSummary(data.summary);
-            setCells(loadStore().cells[id] || []);
+            setCells(saved.cells.length ? saved.cells : legacy);
         } catch (err) {
             setError(`Couldn't open that notebook: ${err.message}`);
         }
@@ -96,6 +107,19 @@ export function useNotebook() {
         setCells([]);
         setError(null);
     }, []);
+
+    const deleteNotebook = async (id) => {
+        try {
+            await api.deleteNotebook(id);
+            const store = loadStore();
+            if (store.cells) delete store.cells[id];
+            saveStore(store);
+            if (id === sessionId) newNotebook();
+            refreshNotebooks();
+        } catch (err) {
+            setError(`Couldn't delete that notebook: ${err.message}`);
+        }
+    };
 
     const addCell = (cell) => setCells(prev => [...prev, { id: newId(), ...cell }]);
     const patchCell = (id, patch) => setCells(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
@@ -227,5 +251,6 @@ export function useNotebook() {
         copyCell,
         openNotebook,
         newNotebook,
+        deleteNotebook,
     };
 }

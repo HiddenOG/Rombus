@@ -5,13 +5,13 @@ import numpy as np
 import uuid
 import os
 import json
-import sqlite3
 import time
 from typing import Dict, Optional, Any, List
 from app.config import settings
 from app.recipe import STEP_TYPES, Context, Line, apply_to, run_line
 from app.recipe_code import step_code
 from app.code_checks import peeking_warnings
+from app.storage import Database, LocalFileStore, database_url
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,10 @@ class DataSession:
         self.lock_count = 0
         # Set by recipe changes: True if trained models had to be cleared because the data changed
         self.models_cleared = False
+        # The notebook's cells as the frontend shows them (saved so any browser can reopen them)
+        self.cells: List[Dict[str, Any]] = []
+        # How many times the locked test rows were used for the final exam (each extra look erodes trust)
+        self.exam_count = 0
         self.created_at = time.time()
         self.updated_at = time.time()
 
@@ -283,40 +287,18 @@ class DataSession:
 
 
 class SessionManager:
-    """Manages data sessions with SQLite persistence."""
+    """Keeps sessions in memory and saves them through the storage layer (app/storage.py)."""
 
     def __init__(self):
         self._sessions: Dict[str, DataSession] = {}
-        self._db_path: Optional[str] = None
+        self._db: Optional[Database] = None
+        self._files: Optional[LocalFileStore] = None
 
     def initialize(self):
-        """Initialize the data directory and SQLite database."""
+        """Open the database (SQLite by default, PostgreSQL via DATABASE_URL) and the file store."""
         os.makedirs(settings.DATA_DIR, exist_ok=True)
-        self._db_path = os.path.join(settings.DATA_DIR, "sessions.db")
-        self._init_db()
-
-    def _init_db(self):
-        """Create the sessions metadata table."""
-        with sqlite3.connect(self._db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS sessions (
-                    session_id TEXT PRIMARY KEY,
-                    filename TEXT NOT NULL,
-                    current_stage TEXT NOT NULL,
-                    target_column TEXT,
-                    problem_type TEXT,
-                    completed_steps TEXT,
-                    memory TEXT,
-                    workflow_log TEXT,
-                    created_at REAL,
-                    updated_at REAL
-                )
-            """)
-            # Columns added after the first release
-            existing = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
-            for column, sql_type in [("test_size", "REAL"), ("recipe", "TEXT"), ("lock_count", "INTEGER")]:
-                if column not in existing:
-                    conn.execute(f"ALTER TABLE sessions ADD COLUMN {column} {sql_type}")
+        self._db = Database(database_url())
+        self._files = LocalFileStore(settings.DATA_DIR)
 
     def create_session(self, df: pd.DataFrame, filename: str) -> DataSession:
         """Create a new session and persist it."""
@@ -326,85 +308,64 @@ class SessionManager:
         return session
 
     def get_session(self, session_id: str) -> Optional[DataSession]:
-        """Retrieve a session from memory or disk."""
-        # Try memory first
+        """Retrieve a session from memory, or rebuild it from storage."""
         if session_id in self._sessions:
             return self._sessions[session_id]
-
-        # Try loading from disk
         session = self._load_session(session_id)
         if session:
             self._sessions[session_id] = session
         return session
 
-    def _path(self, session_id: str, suffix: str) -> str:
-        return os.path.join(settings.DATA_DIR, f"{session_id}{suffix}.parquet")
-
-    def _write_or_remove(self, df: Optional[pd.DataFrame], path: str) -> None:
+    def _save_or_delete(self, key: str, df: Optional[pd.DataFrame]) -> None:
         if df is not None:
-            df.to_parquet(path, index=False)
-        elif os.path.exists(path):
-            os.remove(path)
+            self._files.save(key, df)
+        else:
+            self._files.delete(key)
 
     def _persist_session(self, session: DataSession):
-        """Save the data needed to rebuild the session: original rows, the lock, and the recipe.
+        """Save what's needed to rebuild the session: original rows, the lock, the recipe, the cells.
 
         The cleaned training rows aren't stored: they're rebuilt on load by replaying the
         recipe on the raw training rows, which also restores every sticky note.
         """
-        if not self._db_path:
+        if not self._db:
             return
 
         session.updated_at = time.time()
-        session.original_df.to_parquet(self._path(session.session_id, "_original"), index=False)
-        self._write_or_remove(session.raw_train, self._path(session.session_id, "_train"))
-        self._write_or_remove(session.test_df, self._path(session.session_id, "_test"))
+        sid = session.session_id
+        self._files.save(f"{sid}_original", session.original_df)
+        self._save_or_delete(f"{sid}_train", session.raw_train)
+        self._save_or_delete(f"{sid}_test", session.test_df)
 
-        # Save metadata to SQLite
-        with sqlite3.connect(self._db_path) as conn:
-            conn.execute("""
-                INSERT OR REPLACE INTO sessions
-                (session_id, filename, current_stage, target_column, problem_type,
-                 completed_steps, memory, workflow_log, created_at, updated_at, test_size,
-                 recipe, lock_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                session.session_id,
-                session.filename,
-                session.current_stage,
-                session.target_column,
-                session.problem_type,
-                json.dumps(session.completed_steps),
-                json.dumps(session.memory[-20:]),  # Keep last 20 messages
-                json.dumps(session.workflow_log[-50:]),
-                session.created_at,
-                session.updated_at,
-                session.test_size,
-                json.dumps([line.to_json() for line in session.recipe]),
-                session.lock_count,
-            ))
+        self._db.save({
+            "session_id": sid,
+            "filename": session.filename,
+            "current_stage": session.current_stage,
+            "target_column": session.target_column,
+            "problem_type": session.problem_type,
+            "completed_steps": json.dumps(session.completed_steps),
+            "memory": json.dumps(session.memory[-20:]),  # Keep last 20 messages
+            "workflow_log": json.dumps(session.workflow_log[-50:]),
+            "created_at": session.created_at,
+            "updated_at": session.updated_at,
+            "test_size": session.test_size,
+            "recipe": json.dumps([line.to_json() for line in session.recipe]),
+            "lock_count": session.lock_count,
+            "cells": json.dumps(session.cells, default=str),
+            "exam_count": session.exam_count,
+        })
 
     def _load_session(self, session_id: str) -> Optional[DataSession]:
-        """Load a session from SQLite + Parquet."""
-        if not self._db_path:
+        """Rebuild a session from its record and data files."""
+        if not self._db:
             return None
-
         try:
-            with sqlite3.connect(self._db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                row = conn.execute(
-                    "SELECT * FROM sessions WHERE session_id = ?",
-                    (session_id,)
-                ).fetchone()
-
-            if not row:
+            row = self._db.get(session_id)
+            original = self._files.load(f"{session_id}_original") if row else None
+            if row is None or original is None:
                 return None
 
-            original_path = self._path(session_id, "_original")
-            if not os.path.exists(original_path):
-                return None
-
-            session = DataSession(pd.read_parquet(original_path), row["filename"], session_id=session_id)
+            session = DataSession(original, row["filename"], session_id=session_id)
             session.current_stage = row["current_stage"]
             session.target_column = row["target_column"]
             session.problem_type = row["problem_type"]
@@ -414,12 +375,13 @@ class SessionManager:
             session.created_at = row["created_at"]
             session.updated_at = row["updated_at"]
             session.lock_count = row["lock_count"] or 0
+            session.cells = json.loads(row["cells"] or "[]")
+            session.exam_count = row["exam_count"] or 0
 
             # Rebuild the training rows: raw training rows + replayed recipe (restores sticky notes too)
-            train_path, test_path = self._path(session_id, "_train"), self._path(session_id, "_test")
-            if os.path.exists(train_path) and os.path.exists(test_path):
-                session.raw_train = pd.read_parquet(train_path)
-                session.test_df = pd.read_parquet(test_path)
+            train, test = self._files.load(f"{session_id}_train"), self._files.load(f"{session_id}_test")
+            if train is not None and test is not None:
+                session.raw_train, session.test_df = train, test
                 session.test_size = row["test_size"]
                 lines = [Line(s["tool"], s["args"], **({"id": s["id"]} if "id" in s else {}))
                          for s in json.loads(row["recipe"] or "[]")]
@@ -437,43 +399,29 @@ class SessionManager:
 
     def list_sessions(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Most recently used sessions, for the notebook list."""
-        if not self._db_path:
+        if not self._db:
             return []
-        with sqlite3.connect(self._db_path) as conn:
-            rows = conn.execute(
-                "SELECT session_id, filename, target_column, current_stage, updated_at "
-                "FROM sessions ORDER BY updated_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
         return [
-            {"session_id": r[0], "filename": r[1], "target": r[2], "stage": r[3], "updated_at": r[4]}
-            for r in rows
+            {"session_id": r["session_id"], "filename": r["filename"], "target": r["target_column"],
+             "stage": r["current_stage"], "updated_at": r["updated_at"]}
+            for r in self._db.recent(limit)
         ]
 
     def cleanup_expired(self):
         """Remove sessions older than TTL."""
         cutoff = time.time() - (settings.SESSION_TTL_HOURS * 3600)
-        expired = [
-            sid for sid, s in self._sessions.items()
-            if s.updated_at < cutoff
-        ]
+        expired = [sid for sid, s in self._sessions.items() if s.updated_at < cutoff]
         for sid in expired:
-            self._delete_session(sid)
+            self.delete_session(sid)
 
-    def _delete_session(self, session_id: str):
-        """Remove a session from memory and disk."""
+    def delete_session(self, session_id: str):
+        """Remove a notebook everywhere: memory, data files and its database record."""
         self._sessions.pop(session_id, None)
-
-        # Remove parquet files
-        for suffix in ["", "_original", "_train", "_test"]:
-            path = os.path.join(settings.DATA_DIR, f"{session_id}{suffix}.parquet")
-            if os.path.exists(path):
-                os.remove(path)
-
-        # Remove from SQLite
-        if self._db_path:
-            with sqlite3.connect(self._db_path) as conn:
-                conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        if self._files:
+            for suffix in ("", "_original", "_train", "_test"):
+                self._files.delete(f"{session_id}{suffix}")
+        if self._db:
+            self._db.delete(session_id)
 
     @property
     def active_count(self) -> int:

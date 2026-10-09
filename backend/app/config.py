@@ -44,8 +44,9 @@ class Settings(BaseSettings):
     # Session management
     SESSION_TTL_HOURS: int = 24
 
-    # Database
-    DATABASE_URL: str = "sqlite:///./data/sessions.db"
+    # Database. Empty = a local SQLite file in DATA_DIR (private, offline).
+    # A PostgreSQL URL (e.g. from Supabase) works without code changes.
+    DATABASE_URL: str = ""
 
     # Data storage directory
     DATA_DIR: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")

@@ -21,6 +21,7 @@ const App = () => {
           notebooks={nb.notebooks}
           onOpenNotebook={nb.openNotebook}
           onNewNotebook={nb.newNotebook}
+          onDeleteNotebook={nb.deleteNotebook}
         />
         <Notebook nb={nb} />
       </div>
