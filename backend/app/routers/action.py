@@ -21,6 +21,7 @@ async def execute_action(
         raise HTTPException(status_code=404, detail="Session not found.")
 
     # Execute the tool
+    session.models_cleared = False
     result = execute_tool(request.tool, session, request.arguments)
 
     if not result.get("success", False):
@@ -28,6 +29,9 @@ async def execute_action(
             success=False,
             message=result.get("message", "Action failed."),
         )
+
+    if session.models_cleared and request.tool not in ("train_test_split", "train_models", "auto_ml"):
+        result["message"] += " Trained models were cleared because the data changed; train again to use them."
 
     # Update session state
     session.completed_steps.append(request.tool)

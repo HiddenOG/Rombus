@@ -114,12 +114,23 @@ class TestChangingYourMind:
         assert len(session.test_df) == 30
         assert len(session.df) == 70
 
-    def test_cannot_relock_after_cleaning(self, session):
+    def test_relock_after_cleaning_replays_the_recipe(self, session):
         lock(session)
         execute_tool("remove_columns", session, {"columns": ["row_id"]})
-        result = execute_tool("select_target", session, {"column": "churned", "test_size": 0.3})
+        result = lock(session, test_size=0.3)
+        assert "Replayed 1 recipe steps" in result["message"]
+        assert "row_id" not in session.df.columns
+        assert len(session.test_df) == 30
+        assert session.lock_count == 2
+
+    def test_relock_that_breaks_the_recipe_is_refused(self, session):
+        lock(session)
+        execute_tool("remove_columns", session, {"columns": ["age"]})
+        before = (len(session.test_df), session.target_column)
+        # 'age' was removed in the recipe, so it can't become the target
+        result = execute_tool("select_target", session, {"column": "age", "test_size": 0.3})
         assert not result["success"]
-        assert "Undo" in result["message"]
+        assert (len(session.test_df), session.target_column) == before
 
 
 class TestTestSizeLimits:

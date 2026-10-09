@@ -47,20 +47,18 @@ def select_target(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
 
     validate_column(session, col)
 
-    # Changing the split after cleaning would mean the cleaning was learned from different rows
-    if session.is_split and session.can_undo:
-        return {
-            "success": False,
-            "message": "The training rows have already been changed, so the split can't be redone. "
-                       "Undo the cleaning steps first.",
-        }
-
     test_size = parse_test_size(args.get("test_size", DEFAULT_TEST_SIZE))
 
+    previous = (session.target_column, session.problem_type)
     session.target_column = col
     nunique = session.original_df[col].nunique()
     session.problem_type = "classification" if nunique < 20 else "regression"
-    dropped = session.lock_test_rows(test_size)
+    # Re-locking replays the existing recipe on the new training rows
+    try:
+        dropped = session.lock_test_rows(test_size)
+    except ValueError as e:
+        session.target_column, session.problem_type = previous
+        raise ValueError(f"Couldn't re-lock: the existing recipe doesn't fit the new split. {e}") from None
 
     msg = (
         f"Target set to '{col}' ({session.problem_type}, {nunique} unique values). "
@@ -69,6 +67,10 @@ def select_target(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     )
     if dropped:
         msg += f" Removed {dropped} rows with a blank '{col}'."
+    if session.recipe:
+        msg += f" Replayed {len(session.recipe)} recipe steps on the new training rows."
+    if session.lock_count > 1:
+        msg += f" (Locked {session.lock_count} times so far.)"
     return {"success": True, "message": msg}
 
 

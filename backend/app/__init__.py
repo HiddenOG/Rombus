@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.routers import upload, chat, action, health
+from app.routers import upload, chat, action, health, recipe
 from app.session import session_manager
 
 
@@ -37,6 +37,7 @@ def create_app() -> FastAPI:
     app.include_router(upload.router, prefix="/api", tags=["Upload"])
     app.include_router(chat.router, prefix="/api", tags=["Chat"])
     app.include_router(action.router, prefix="/api", tags=["Action"])
+    app.include_router(recipe.router, prefix="/api", tags=["Recipe"])
 
     return app
 

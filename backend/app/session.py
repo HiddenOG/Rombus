@@ -1,3 +1,4 @@
+import logging
 import pandas as pd
 import numpy as np
 import uuid
@@ -7,7 +8,9 @@ import sqlite3
 import time
 from typing import Dict, Optional, Any, List
 from app.config import settings
-from app.recipe import Context, Line, apply_to, replay, run_line
+from app.recipe import STEP_TYPES, Context, Line, apply_to, run_line
+
+logger = logging.getLogger(__name__)
 
 
 class DataSession:
@@ -36,12 +39,42 @@ class DataSession:
         # self.df is always replay(raw_train, recipe).
         self.raw_train: Optional[pd.DataFrame] = None
         self.recipe: List[Line] = []
+        # How many times the test rows were (re)locked; many re-locks can mean shopping for a lucky split
+        self.lock_count = 0
+        # Set by recipe changes: True if trained models had to be cleared because the data changed
+        self.models_cleared = False
         self.created_at = time.time()
         self.updated_at = time.time()
 
     @property
     def ctx(self) -> Context:
         return Context(target=self.target_column)
+
+    # ── Recipe changes ──────────────────────────────────────────────────────────
+    # Every change goes through _set_recipe: replay on a scratch copy first, and keep the
+    # result only if every line still runs. A failed change leaves the session untouched.
+
+    def _set_recipe(self, lines: List[Line]) -> None:
+        fresh = [Line(l.tool, dict(l.args)) for l in lines]
+        df = self.raw_train.copy() if self.raw_train is not None else self.df.copy()
+        for i, line in enumerate(fresh):
+            try:
+                df = run_line(line, df, self.ctx)
+            except ValueError as e:
+                raise ValueError(
+                    f"That change would break a later step: '{line.tool.replace('_', ' ')}' "
+                    f"(step {i + 1} after the change) can't run: {e}"
+                ) from None
+        self.df, self.recipe = df, fresh
+        self.models_cleared = self._clear_models()
+        self.updated_at = time.time()
+
+    def _clear_models(self) -> bool:
+        """Data changed, so any split or model built on the old data no longer matches it."""
+        had_models = bool(self.trained_models) or self.X_train is not None
+        self.X_train = self.X_test = self.y_train = self.y_test = None
+        self.trained_models = {}
+        return had_models
 
     def add_step(self, tool: str, args: Dict[str, Any]) -> Line:
         """Run a data-changing step on the training rows and write it into the recipe.
@@ -51,6 +84,7 @@ class DataSession:
         line = Line(tool, dict(args))
         self.df = run_line(line, self.df, self.ctx)
         self.recipe.append(line)
+        self.models_cleared = self._clear_models()
         self.updated_at = time.time()
         return line
 
@@ -58,10 +92,42 @@ class DataSession:
         """Cross out the last recipe line and rebuild the training rows from scratch."""
         if not self.recipe:
             return None
-        line = self.recipe.pop()
-        self.df = replay(self.raw_train, self.recipe, self.ctx)
-        self.updated_at = time.time()
+        line = self.recipe[-1]
+        self._set_recipe(self.recipe[:-1])
         return line
+
+    def update_step(self, index: int, args: Dict[str, Any]) -> Line:
+        """Change one line's settings and replay everything from the top."""
+        self._check_index(index)
+        lines = list(self.recipe)
+        lines[index] = Line(lines[index].tool, dict(args))
+        self._set_recipe(lines)
+        return self.recipe[index]
+
+    def delete_step(self, index: int) -> Line:
+        """Remove any line (not just the last) and replay what's left."""
+        self._check_index(index)
+        removed = self.recipe[index]
+        self._set_recipe(self.recipe[:index] + self.recipe[index + 1:])
+        return removed
+
+    def _check_index(self, index: int) -> None:
+        if not 0 <= index < len(self.recipe):
+            raise ValueError(f"There is no step {index + 1}; the recipe has {len(self.recipe)} steps.")
+
+    def recipe_view(self) -> List[Dict[str, Any]]:
+        """The recipe as plain data for the UI: what each step did and what it learned."""
+        return [
+            {
+                "index": i,
+                "tool": l.tool,
+                "args": l.args,
+                "kind": STEP_TYPES[l.tool].kind,
+                "learned": l.learned,
+                "message": l.message,
+            }
+            for i, l in enumerate(self.recipe)
+        ]
 
     def prepare(self, rows: pd.DataFrame) -> pd.DataFrame:
         """Apply the recipe's sticky notes to other rows (test set, new customers)."""
@@ -84,8 +150,21 @@ class DataSession:
 
         Rows with a blank target are dropped first (they can't be learned from or graded).
         Classification splits are stratified when every class has enough rows.
+        An existing recipe is replayed on the new training rows; if it can't run there,
+        the previous split is restored and ValueError is raised.
         Returns the number of rows dropped for a blank target.
         """
+        previous = (self.raw_train, self.test_df, self.test_size, self.df)
+        dropped = self._split(test_size)
+        try:
+            self._set_recipe(self.recipe)
+        except ValueError:
+            self.raw_train, self.test_df, self.test_size, self.df = previous
+            raise
+        self.lock_count += 1
+        return dropped
+
+    def _split(self, test_size: float) -> int:
         from sklearn.model_selection import train_test_split
 
         full = self.original_df.dropna(subset=[self.target_column])
@@ -104,7 +183,6 @@ class DataSession:
         self.df = self.raw_train.copy()
         self.test_df = test.reset_index(drop=True)
         self.test_size = test_size
-        self.recipe = []
         return dropped
 
     def compute_column_evidence(self, col: str) -> Dict[str, Any]:
@@ -152,6 +230,8 @@ class DataSession:
             "is_split": self.is_split,
             "test_rows": len(self.test_df) if self.is_split else 0,
             "test_size": self.test_size,
+            "lock_count": self.lock_count,
+            "recipe": self.recipe_view(),
             "completed_steps": self.completed_steps,
             "can_undo": self.can_undo,
             "undo_count": self.undo_count,
@@ -208,8 +288,9 @@ class SessionManager:
             """)
             # Columns added after the first release
             existing = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
-            if "test_size" not in existing:
-                conn.execute("ALTER TABLE sessions ADD COLUMN test_size REAL")
+            for column, sql_type in [("test_size", "REAL"), ("recipe", "TEXT"), ("lock_count", "INTEGER")]:
+                if column not in existing:
+                    conn.execute(f"ALTER TABLE sessions ADD COLUMN {column} {sql_type}")
 
     def create_session(self, df: pd.DataFrame, filename: str) -> DataSession:
         """Create a new session and persist it."""
@@ -230,35 +311,37 @@ class SessionManager:
             self._sessions[session_id] = session
         return session
 
+    def _path(self, session_id: str, suffix: str) -> str:
+        return os.path.join(settings.DATA_DIR, f"{session_id}{suffix}.parquet")
+
+    def _write_or_remove(self, df: Optional[pd.DataFrame], path: str) -> None:
+        if df is not None:
+            df.to_parquet(path, index=False)
+        elif os.path.exists(path):
+            os.remove(path)
+
     def _persist_session(self, session: DataSession):
-        """Save session metadata to SQLite and DataFrame to Parquet."""
+        """Save the data needed to rebuild the session: original rows, the lock, and the recipe.
+
+        The cleaned training rows aren't stored: they're rebuilt on load by replaying the
+        recipe on the raw training rows, which also restores every sticky note.
+        """
         if not self._db_path:
             return
 
         session.updated_at = time.time()
-
-        # Save DataFrame as parquet
-        parquet_path = os.path.join(settings.DATA_DIR, f"{session.session_id}.parquet")
-        session.df.to_parquet(parquet_path, index=False)
-
-        # Save original DF
-        original_path = os.path.join(settings.DATA_DIR, f"{session.session_id}_original.parquet")
-        session.original_df.to_parquet(original_path, index=False)
-
-        # Save locked test rows
-        test_path = os.path.join(settings.DATA_DIR, f"{session.session_id}_test.parquet")
-        if session.is_split:
-            session.test_df.to_parquet(test_path, index=False)
-        elif os.path.exists(test_path):
-            os.remove(test_path)
+        session.original_df.to_parquet(self._path(session.session_id, "_original"), index=False)
+        self._write_or_remove(session.raw_train, self._path(session.session_id, "_train"))
+        self._write_or_remove(session.test_df, self._path(session.session_id, "_test"))
 
         # Save metadata to SQLite
         with sqlite3.connect(self._db_path) as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO sessions
                 (session_id, filename, current_stage, target_column, problem_type,
-                 completed_steps, memory, workflow_log, created_at, updated_at, test_size)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 completed_steps, memory, workflow_log, created_at, updated_at, test_size,
+                 recipe, lock_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 session.session_id,
                 session.filename,
@@ -271,6 +354,8 @@ class SessionManager:
                 session.created_at,
                 session.updated_at,
                 session.test_size,
+                json.dumps([line.to_json() for line in session.recipe]),
+                session.lock_count,
             ))
 
     def _load_session(self, session_id: str) -> Optional[DataSession]:
@@ -289,13 +374,11 @@ class SessionManager:
             if not row:
                 return None
 
-            # Load DataFrame
-            parquet_path = os.path.join(settings.DATA_DIR, f"{session_id}.parquet")
-            if not os.path.exists(parquet_path):
+            original_path = self._path(session_id, "_original")
+            if not os.path.exists(original_path):
                 return None
 
-            df = pd.read_parquet(parquet_path)
-            session = DataSession(df, row["filename"], session_id=session_id)
+            session = DataSession(pd.read_parquet(original_path), row["filename"], session_id=session_id)
             session.current_stage = row["current_stage"]
             session.target_column = row["target_column"]
             session.problem_type = row["problem_type"]
@@ -304,20 +387,21 @@ class SessionManager:
             session.workflow_log = json.loads(row["workflow_log"] or "[]")
             session.created_at = row["created_at"]
             session.updated_at = row["updated_at"]
+            session.lock_count = row["lock_count"] or 0
 
-            # Load original DF if available
-            original_path = os.path.join(settings.DATA_DIR, f"{session_id}_original.parquet")
-            if os.path.exists(original_path):
-                session.original_df = pd.read_parquet(original_path)
-
-            # Load locked test rows if the split happened
-            test_path = os.path.join(settings.DATA_DIR, f"{session_id}_test.parquet")
-            if os.path.exists(test_path):
+            # Rebuild the training rows: raw training rows + replayed recipe (restores sticky notes too)
+            train_path, test_path = self._path(session_id, "_train"), self._path(session_id, "_test")
+            if os.path.exists(train_path) and os.path.exists(test_path):
+                session.raw_train = pd.read_parquet(train_path)
                 session.test_df = pd.read_parquet(test_path)
                 session.test_size = row["test_size"]
+                lines = [Line(s["tool"], s["args"]) for s in json.loads(row["recipe"] or "[]")]
+                session._set_recipe(lines)
+                session.models_cleared = False
 
             return session
         except Exception:
+            logger.exception("Could not load session %s", session_id)
             return None
 
     def save(self, session: DataSession):
@@ -339,7 +423,7 @@ class SessionManager:
         self._sessions.pop(session_id, None)
 
         # Remove parquet files
-        for suffix in ["", "_original", "_test"]:
+        for suffix in ["", "_original", "_train", "_test"]:
             path = os.path.join(settings.DATA_DIR, f"{session_id}{suffix}.parquet")
             if os.path.exists(path):
                 os.remove(path)
