@@ -6,9 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.auth import verify_api_key
-from app.recipe import STEP_TYPES
 from app.session import DataSession, session_manager
-from app.tools import BEFORE_SPLIT_TOOLS, TOOL_SPECS
+from app.tools import BEFORE_SPLIT_TOOLS, TOOL_KINDS, TOOL_SPECS
 
 router = APIRouter()
 
@@ -36,11 +35,7 @@ async def list_tools():
     """Every tool with its settings schema, so the notebook can build edit forms."""
     return {
         "tools": [
-            {
-                **spec,
-                "kind": STEP_TYPES[name].kind if name in STEP_TYPES else "view",
-                "before_split": name in BEFORE_SPLIT_TOOLS,
-            }
+            {**spec, "kind": TOOL_KINDS[name], "before_split": name in BEFORE_SPLIT_TOOLS}
             for name, spec in TOOL_SPECS.items()
         ]
     }

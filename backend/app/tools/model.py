@@ -115,6 +115,7 @@ def target_classes(session: DataSession) -> Optional[List[str]]:
         "test_size": {"type": "number", "description": "Fraction for the test set (default 0.2)."},
         "stratify": {"type": "boolean", "description": "Stratify by target (classification only)."},
     },
+    kind="action",
 )
 def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Split data into training and test sets."""
@@ -159,6 +160,7 @@ def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str,
         },
         "cv_folds": {"type": "integer", "description": "Cross-validation folds (default 5)."},
     },
+    kind="action",
 )
 def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Train one or more ML models."""
@@ -212,7 +214,7 @@ def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-@register_tool("auto_ml", "Grid-search several algorithms with hyperparameter tuning and report the best.")
+@register_tool("auto_ml", "Grid-search several algorithms with hyperparameter tuning and report the best.", kind="action")
 def auto_ml(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Automatically find the best model with hyperparameter tuning (AutoML)."""
     if session.X_train is None:
@@ -378,7 +380,7 @@ def explain_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": False, "message": f"Could not explain model: {str(e)}"}
 
 
-@register_tool("save_model", "Save a trained model (with its preprocessing) to disk.", {"algorithm": ALGORITHM})
+@register_tool("save_model", "Save a trained model (with its preprocessing) to disk.", {"algorithm": ALGORITHM}, kind="action")
 def save_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Save a trained model to disk."""
     if not session.trained_models:

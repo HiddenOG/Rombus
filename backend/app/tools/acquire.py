@@ -38,6 +38,7 @@ def parse_test_size(value: Any) -> float:
     },
     ["column"],
     before_split=True,
+    kind="action",
 )
 def select_target(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Set the target column and lock away the test rows."""

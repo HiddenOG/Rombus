@@ -17,6 +17,12 @@ TOOL_SPECS: Dict[str, Dict[str, Any]] = {}
 # Tools usable before the test rows are locked away (strict mode: no statistics, no changes)
 BEFORE_SPLIT_TOOLS: Set[str] = set()
 
+# What kind of thing each tool does, for the notebook:
+#   view    looks only (charts, tables) and can be safely re-run on the current data
+#   action  changes the session but isn't a recipe step (choose target, train, undo)
+#   fixed / learn / train_only   recipe steps (see app/recipe.py)
+TOOL_KINDS: Dict[str, str] = {}
+
 
 def register_tool(
     name: str,
@@ -24,6 +30,7 @@ def register_tool(
     properties: Optional[Dict[str, Any]] = None,
     required: Optional[List[str]] = None,
     before_split: bool = False,
+    kind: str = "view",
 ):
     """Decorator to register a tool function along with its argument schema."""
     def decorator(func):
@@ -39,6 +46,7 @@ def register_tool(
         }
         if before_split:
             BEFORE_SPLIT_TOOLS.add(name)
+        TOOL_KINDS[name] = kind
         return func
     return decorator
 

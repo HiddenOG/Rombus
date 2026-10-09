@@ -7,6 +7,7 @@ replayable on the locked test rows and on new customers.
 
 from typing import Any, Dict, List, Optional
 
+from app.recipe import STEP_TYPES
 from app.session import DataSession
 from app.tools import COLUMN, COLUMNS, register_tool
 
@@ -22,7 +23,7 @@ def recipe_tool(name: str, description: str, properties: Optional[Dict[str, Any]
         return {"success": True, "message": line.message, "step_id": line.id}
 
     run.__name__ = name
-    register_tool(name, description, properties, required)(run)
+    register_tool(name, description, properties, required, kind=STEP_TYPES[name].kind)(run)
 
 
 recipe_tool("remove_columns", "Drop one or more columns.", {"columns": COLUMNS}, ["columns"])

@@ -64,6 +64,25 @@ export async function getSession(sessionId) {
     return apiRequest(`/api/session/${sessionId}`, { method: 'GET' });
 }
 
+export async function listSessions() {
+    return apiRequest('/api/sessions', { method: 'GET' });
+}
+
+export async function getTools() {
+    return apiRequest('/api/tools', { method: 'GET' });
+}
+
+export async function updateStep(sessionId, stepId, args) {
+    return apiRequest(`/api/session/${sessionId}/recipe/${stepId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ args }),
+    });
+}
+
+export async function deleteStep(sessionId, stepId) {
+    return apiRequest(`/api/session/${sessionId}/recipe/${stepId}`, { method: 'DELETE' });
+}
+
 export async function healthCheck() {
     return apiRequest('/api/health', { method: 'GET' });
 }

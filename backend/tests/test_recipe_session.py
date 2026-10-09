@@ -148,5 +148,8 @@ class TestRecipeAPI:
         assert tools["impute_missing"]["kind"] == "learn"
         assert tools["plot_histogram"]["kind"] == "view"
         assert tools["select_target"]["before_split"]
+        # Actions must never be offered as one-click reruns (re-locking = shopping for a split)
+        assert {tools[t]["kind"] for t in ("select_target", "train_models", "undo")} == {"action"}
+        assert tools["remove_duplicates"]["kind"] == "train_only"
         assert "strategy" in tools["impute_missing"]["parameters"]["properties"]
         assert client.get("/api/sessions").json()["sessions"] == []

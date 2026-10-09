@@ -1,47 +1,28 @@
 import React from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Sidebar } from './components/Sidebar';
-import { ChatPanel } from './components/ChatPanel';
-import { useSession } from './hooks/useSession';
+import { Notebook } from './components/Notebook';
+import { useNotebook } from './hooks/useNotebook';
 
 /**
- * App — Slim orchestrator composing Sidebar and ChatPanel.
+ * App — sidebar (notebooks + dataset) and the notebook of cells.
  */
 const App = () => {
-  const {
-    sessionId,
-    currentStage,
-    summary,
-    chatHistory,
-    isProcessing,
-    error,
-    chatEndRef,
-    handleUpload,
-    handleChat,
-    handleAction,
-    clearError,
-  } = useSession();
+  const nb = useNotebook();
 
   return (
     <ErrorBoundary>
       <div className="flex h-screen overflow-hidden bg-canvas font-sans text-ink">
         <Sidebar
-          sessionId={sessionId}
-          summary={summary}
-          onFileUpload={handleUpload}
-          isProcessing={isProcessing}
+          sessionId={nb.sessionId}
+          summary={nb.summary}
+          onFileUpload={nb.upload}
+          isProcessing={nb.isProcessing}
+          notebooks={nb.notebooks}
+          onOpenNotebook={nb.openNotebook}
+          onNewNotebook={nb.newNotebook}
         />
-        <ChatPanel
-          chatHistory={chatHistory}
-          currentStage={currentStage}
-          sessionId={sessionId}
-          isProcessing={isProcessing}
-          error={error}
-          chatEndRef={chatEndRef}
-          onChat={handleChat}
-          onAction={handleAction}
-          onClearError={clearError}
-        />
+        <Notebook nb={nb} />
       </div>
     </ErrorBoundary>
   );

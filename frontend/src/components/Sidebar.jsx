@@ -1,11 +1,11 @@
 import React from 'react';
-import { Upload, FileSpreadsheet, Layers, Sparkles, Undo2, Lock, Target, Boxes } from 'lucide-react';
+import { Upload, FileSpreadsheet, Layers, Sparkles, Undo2, Lock, Target, Boxes, NotebookPen, Plus } from 'lucide-react';
 import { Logo } from './Logo';
 
 /**
  * Sidebar — brand, dataset overview and column evidence panel.
  */
-export function Sidebar({ sessionId, summary, onFileUpload, isProcessing }) {
+export function Sidebar({ sessionId, summary, onFileUpload, isProcessing, notebooks = [], onOpenNotebook, onNewNotebook }) {
     return (
         <aside className="w-80 shrink-0 bg-surface border-r border-line flex flex-col overflow-hidden">
             {/* Brand */}
@@ -18,6 +18,13 @@ export function Sidebar({ sessionId, summary, onFileUpload, isProcessing }) {
             </div>
 
             <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar">
+                <NotebookList
+                    notebooks={notebooks}
+                    currentId={sessionId}
+                    onOpen={onOpenNotebook}
+                    onNew={onNewNotebook}
+                    disabled={isProcessing}
+                />
                 {!sessionId ? (
                     <UploadCard onFileUpload={onFileUpload} isProcessing={isProcessing} />
                 ) : (
@@ -28,6 +35,53 @@ export function Sidebar({ sessionId, summary, onFileUpload, isProcessing }) {
                 )}
             </div>
         </aside>
+    );
+}
+
+function timeAgo(seconds) {
+    const mins = Math.round((Date.now() / 1000 - seconds) / 60);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const hours = Math.round(mins / 60);
+    return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
+}
+
+function NotebookList({ notebooks, currentId, onOpen, onNew, disabled }) {
+    return (
+        <section>
+            <div className="mb-2.5 flex items-center justify-between">
+                <SectionTitle icon={NotebookPen}>Notebooks</SectionTitle>
+                <button
+                    onClick={onNew}
+                    disabled={disabled}
+                    className="-mt-2.5 flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-50"
+                >
+                    <Plus className="h-3.5 w-3.5" /> New
+                </button>
+            </div>
+            {notebooks.length === 0 ? (
+                <p className="text-xs text-ink-3">Your notebooks will appear here.</p>
+            ) : (
+                <ul className="max-h-44 space-y-0.5 overflow-y-auto custom-scrollbar">
+                    {notebooks.map(n => (
+                        <li key={n.session_id}>
+                            <button
+                                onClick={() => onOpen(n.session_id)}
+                                disabled={disabled}
+                                className={`w-full rounded-lg px-2.5 py-1.5 text-left transition-colors ${
+                                    n.session_id === currentId ? 'bg-brand-50 text-brand-800' : 'text-ink-2 hover:bg-surface-2'
+                                }`}
+                            >
+                                <span className="block truncate text-sm font-medium">{n.filename}</span>
+                                <span className="block truncate text-[11px] text-ink-3">
+                                    {n.target ? `predicting ${n.target} · ` : ''}{timeAgo(n.updated_at)}
+                                </span>
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </section>
     );
 }
 
