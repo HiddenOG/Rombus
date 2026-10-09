@@ -1,4 +1,4 @@
-﻿"""Lesson 1 â€” how much does data leakage actually matter?
+"""Lesson 1 — how much does data leakage actually matter?
 
 Run from backend/:  python -m experiments.leakage_demo
 

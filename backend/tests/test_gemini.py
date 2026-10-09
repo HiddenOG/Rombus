@@ -1,4 +1,4 @@
-﻿"""Tests for the Gemini copilot integration (no network calls)."""
+"""Tests for the Gemini copilot integration (no network calls)."""
 
 import pandas as pd
 import pytest
