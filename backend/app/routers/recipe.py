@@ -86,6 +86,18 @@ async def update_step(session_id: str, step_id: str, body: StepUpdate, _: str = 
     return _respond(session, f"Updated the step and replayed the recipe. {line.message}")
 
 
+class CodeRequest(BaseModel):
+    tool: str
+    args: Dict[str, Any] = {}
+
+
+@router.post("/session/{session_id}/code")
+async def show_code(session_id: str, body: CodeRequest, _: str = Depends(verify_api_key)):
+    """Equivalent Python for an action or view cell (recipe steps carry their own code)."""
+    from app.action_code import action_code
+    return {"code": action_code(_session(session_id), body.tool, body.args)}
+
+
 class CodeUpdate(BaseModel):
     code: str
 

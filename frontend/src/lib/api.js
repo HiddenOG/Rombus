@@ -94,6 +94,13 @@ export async function updateStep(sessionId, stepId, args) {
     });
 }
 
+export async function getActionCode(sessionId, tool, args) {
+    return apiRequest(`/api/session/${sessionId}/code`, {
+        method: 'POST',
+        body: JSON.stringify({ tool, args }),
+    });
+}
+
 export async function updateStepCode(sessionId, stepId, code) {
     return apiRequest(`/api/session/${sessionId}/recipe/${stepId}/code`, {
         method: 'PUT',

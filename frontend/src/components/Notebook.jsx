@@ -54,6 +54,7 @@ export function Notebook({ nb }) {
                                 tool={tools[cell.tool]}
                                 step={cell.stepId ? recipeById[cell.stepId] : undefined}
                                 summary={summary}
+                                sessionId={sessionId}
                                 isProcessing={isProcessing}
                                 onEdit={nb.editStep}
                                 onEditCode={nb.editCode}

@@ -7,6 +7,7 @@ import { EvidenceCard } from './EvidenceCard';
 import { StepEditor } from './StepEditor';
 import { CodeView } from './CodeView';
 import { CodeEditor } from './CodeEditor';
+import { getActionCode } from '../lib/api';
 
 const humanize = (s) => s.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
 
@@ -74,11 +75,24 @@ export function AskCell({ cell, number, onRun, isProcessing }) {
     );
 }
 
-export function RunCell({ cell, number, tool, step, summary, isProcessing, onEdit, onEditCode, onRevert, onCopy, onDelete, onRerun }) {
+export function RunCell({ cell, number, tool, step, summary, sessionId, isProcessing, onEdit, onEditCode, onRevert, onCopy, onDelete, onRerun }) {
     const [editing, setEditing] = useState(false);
     const [tab, setTab] = useState('result');
     const [editingCode, setEditingCode] = useState(false);
+    const [actionCode, setActionCode] = useState(null);
     const kind = tool?.kind || 'view';
+
+    // Actions and views get their code from the server the first time the Code tab is opened
+    const openTab = async (t) => {
+        setTab(t);
+        if (t === 'code' && !cell.stepId && !actionCode) {
+            try {
+                setActionCode((await getActionCode(sessionId, cell.tool, cell.args || {})).code);
+            } catch (err) {
+                setActionCode(`# Couldn't load the code: ${err.message}`);
+            }
+        }
+    };
     const isStep = Boolean(cell.stepId);
     const removed = isStep && !step; // undone or deleted elsewhere
     // Only views can be safely re-run; actions (choose target, train) are never one-click repeats
@@ -200,12 +214,12 @@ export function RunCell({ cell, number, tool, step, summary, isProcessing, onEdi
                         />
                     )}
 
-                    {step?.code && (
+                    {(step?.code || !isStep) && (
                         <div className="flex gap-1 border-b border-line">
                             {['result', 'code'].map(t => (
                                 <button
                                     key={t}
-                                    onClick={() => setTab(t)}
+                                    onClick={() => openTab(t)}
                                     className={`-mb-px border-b-2 px-2.5 py-1.5 text-xs font-semibold capitalize transition-colors ${
                                         tab === t ? 'border-brand-500 text-ink' : 'border-transparent text-ink-3 hover:text-ink-2'
                                     }`}
@@ -216,7 +230,18 @@ export function RunCell({ cell, number, tool, step, summary, isProcessing, onEdi
                         </div>
                     )}
 
-                    {tab === 'code' && step?.code ? (
+                    {tab === 'code' && !isStep ? (
+                        <>
+                            <p className="text-xs text-ink-3">
+                                The equivalent Python for what this {kind === 'view' ? 'view' : 'action'} did, with your settings.
+                                Names like <span className="font-mono text-ink-2">train</span>, <span className="font-mono text-ink-2">recipe</span> and{' '}
+                                <span className="font-mono text-ink-2">model</span> refer to earlier cells.
+                            </p>
+                            {actionCode ? <CodeView code={actionCode} /> : (
+                                <p className="flex items-center gap-2 text-sm text-ink-3"><Loader2 className="h-4 w-4 animate-spin" /> Loading code…</p>
+                            )}
+                        </>
+                    ) : tab === 'code' && step?.code ? (
                         editingCode ? (
                             <CodeEditor
                                 initialCode={step.editable_code || step.code}
