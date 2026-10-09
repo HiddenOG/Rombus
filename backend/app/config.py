@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     # Google Gemini
     GOOGLE_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
+    # Tried in order when the main model is busy (comma-separated)
+    GEMINI_FALLBACK_MODELS: str = "gemini-2.5-flash-lite"
 
     # API Authentication (optional — empty string disables auth)
     API_SECRET_KEY: str = ""

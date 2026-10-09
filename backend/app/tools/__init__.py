@@ -1,8 +1,11 @@
 """Tool registry — maps tool names to handler functions and their schemas."""
 
+import logging
 from typing import Dict, Callable, Any, List, Optional, Set
 import pandas as pd
 from app.session import DataSession
+
+logger = logging.getLogger(__name__)
 
 
 # Registry of all available tools
@@ -62,10 +65,16 @@ def execute_tool(tool_name: str, session: DataSession, args: Dict[str, Any]) -> 
 
     try:
         return TOOL_REGISTRY[tool_name](session, args)
-    except Exception as e:
-        import traceback
-        print(traceback.format_exc())
+    except ValueError as e:
+        # Our own validation errors (bad column name, test size out of range) are user-facing
         return {"success": False, "message": str(e)}
+    except Exception:
+        logger.exception("Tool %s crashed with arguments %s", tool_name, args)
+        return {
+            "success": False,
+            "message": f"Something went wrong while running '{tool_name}'. "
+                       "The details were logged on the server; try different settings or undo the last step.",
+        }
 
 
 def validate_column(session: DataSession, col: str) -> None:

@@ -69,6 +69,18 @@ class TestLocking:
         assert result["success"], result["message"]
         assert len(result["evidence"]["preview"]) == 5
 
+    def test_unexpected_crash_gives_plain_message(self, session, monkeypatch):
+        from app import tools
+
+        def broken(session, args):
+            return float(None)  # the kind of crash the user hit
+
+        monkeypatch.setitem(tools.TOOL_REGISTRY, "preview_data", broken)
+        result = execute_tool("preview_data", session, {})
+        assert not result["success"]
+        assert "Something went wrong while running 'preview_data'" in result["message"]
+        assert "NoneType" not in result["message"]
+
     def test_no_row_in_both_piles(self, session):
         lock(session)
         assert set(session.df["row_id"]).isdisjoint(session.test_df["row_id"])

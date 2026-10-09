@@ -101,6 +101,87 @@ class TestParseResponse:
         assert parsed["suggested_actions"] == []
 
 
+class FakeGoogle:
+    """Stands in for the Gemini client: each model either answers or fails with a status code."""
+
+    def __init__(self, failures):
+        self.failures = failures  # model name -> HTTP status it fails with
+        self.calls = []
+        self.aio = self
+        self.models = self
+
+    async def generate_content(self, model, **_):
+        from google.genai import errors
+        self.calls.append(model)
+        if model in self.failures:
+            code = self.failures[model]
+            error_cls = errors.ServerError if code >= 500 else errors.ClientError
+            raise error_cls(code, {"error": {"code": code, "message": "fake", "status": "FAKE"}})
+        return _response(types.Part(text=f"answer from {model}"))
+
+
+class TestBackupModels:
+    @pytest.fixture(autouse=True)
+    def models(self, monkeypatch):
+        from app.config import settings
+        monkeypatch.setattr(settings, "GOOGLE_API_KEY", "test-key")
+        monkeypatch.setattr(settings, "GEMINI_MODEL", "main")
+        monkeypatch.setattr(settings, "GEMINI_FALLBACK_MODELS", "backup1, backup2")
+
+    def ask(self, monkeypatch, session, failures):
+        import asyncio
+        from app import gemini
+        fake = FakeGoogle(failures)
+        monkeypatch.setattr(gemini, "_get_client", lambda: fake)
+        return asyncio.run(gemini.get_copilot_response(session, "hi")), fake.calls
+
+    def test_main_model_answers(self, monkeypatch, session):
+        out, calls = self.ask(monkeypatch, session, {})
+        assert out["response"] == "answer from main"
+        assert calls == ["main"]
+
+    def test_busy_main_model_falls_back(self, monkeypatch, session):
+        out, calls = self.ask(monkeypatch, session, {"main": 503})
+        assert out["response"] == "answer from backup1"
+        assert calls == ["main", "backup1"]
+
+    def test_rate_limited_falls_back(self, monkeypatch, session):
+        out, calls = self.ask(monkeypatch, session, {"main": 429, "backup1": 503})
+        assert out["response"] == "answer from backup2"
+
+    def test_all_busy_gives_friendly_message(self, monkeypatch, session):
+        from app.gemini import BUSY_MESSAGE
+        out, calls = self.ask(monkeypatch, session, {"main": 503, "backup1": 503, "backup2": 500})
+        assert out["response"] == BUSY_MESSAGE
+        assert calls == ["main", "backup1", "backup2"]
+
+    def test_bad_key_does_not_try_backups(self, monkeypatch, session):
+        from app.gemini import KEY_MESSAGE
+        out, calls = self.ask(monkeypatch, session, {"main": 401})
+        assert out["response"] == KEY_MESSAGE
+        assert calls == ["main"]
+
+    def test_bad_request_does_not_try_backups(self, monkeypatch, session):
+        from app.gemini import GENERIC_MESSAGE
+        out, calls = self.ask(monkeypatch, session, {"main": 400})
+        assert out["response"] == GENERIC_MESSAGE
+        assert calls == ["main"]
+
+    def test_missing_key_skips_google_entirely(self, monkeypatch, session):
+        from app.config import settings
+        from app.gemini import KEY_MESSAGE
+        monkeypatch.setattr(settings, "GOOGLE_API_KEY", "")
+        out, calls = self.ask(monkeypatch, session, {})
+        assert out["response"] == KEY_MESSAGE
+        assert calls == []
+
+    def test_duplicate_models_tried_once(self, monkeypatch, session):
+        from app.config import settings
+        monkeypatch.setattr(settings, "GEMINI_FALLBACK_MODELS", "main,backup1,backup1")
+        _, calls = self.ask(monkeypatch, session, {"main": 503, "backup1": 503})
+        assert calls == ["main", "backup1"]
+
+
 class TestCategoricalColumns:
     def test_detects_pandas3_strings_and_category(self):
         df = pd.DataFrame({
