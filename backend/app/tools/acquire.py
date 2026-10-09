@@ -61,6 +61,9 @@ def select_target(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         session.target_column, session.problem_type = previous
         raise ValueError(f"Couldn't re-lock: the existing recipe doesn't fit the new split. {e}") from None
 
+    if session.current_stage == "ACQUIRE":
+        session.current_stage = "SCRUB"
+
     msg = (
         f"Target set to '{col}' ({session.problem_type}, {nunique} unique values). "
         f"Locked away {len(session.test_df)} rows ({test_size:.0%}) as the final test set; "

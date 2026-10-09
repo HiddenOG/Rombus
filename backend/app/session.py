@@ -10,6 +10,7 @@ import time
 from typing import Dict, Optional, Any, List
 from app.config import settings
 from app.recipe import STEP_TYPES, Context, Line, apply_to, run_line
+from app.recipe_code import step_code
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,7 @@ class DataSession:
             "kind": STEP_TYPES[line.tool].kind,
             "learned": line.learned,
             "message": line.message,
+            "code": step_code(line, self.target_column),
         }
 
     def recipe_view(self) -> List[Dict[str, Any]]:

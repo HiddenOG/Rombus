@@ -5,6 +5,7 @@ import { Logo } from './Logo';
 import { ActionButton } from './ActionButton';
 import { EvidenceCard } from './EvidenceCard';
 import { StepEditor } from './StepEditor';
+import { CodeView } from './CodeView';
 
 const humanize = (s) => s.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
 
@@ -73,6 +74,7 @@ export function AskCell({ cell, number, onRun, isProcessing }) {
 
 export function RunCell({ cell, number, tool, step, summary, isProcessing, onEdit, onCopy, onDelete, onRerun }) {
     const [editing, setEditing] = useState(false);
+    const [tab, setTab] = useState('result');
     const kind = tool?.kind || 'view';
     const isStep = Boolean(cell.stepId);
     const removed = isStep && !step; // undone or deleted elsewhere
@@ -158,14 +160,42 @@ export function RunCell({ cell, number, tool, step, summary, isProcessing, onEdi
                         />
                     )}
 
-                    <p className="whitespace-pre-wrap text-sm text-ink-2">{step?.message || cell.message}</p>
-
-                    {step && kind === 'learn' && <StickyNoteView learned={step.learned} />}
-                    {kind === 'train_only' && !removed && (
-                        <p className="text-xs text-ink-3">Applied to the training rows only; skipped for the test set and new customers.</p>
+                    {step?.code && (
+                        <div className="flex gap-1 border-b border-line">
+                            {['result', 'code'].map(t => (
+                                <button
+                                    key={t}
+                                    onClick={() => setTab(t)}
+                                    className={`-mb-px border-b-2 px-2.5 py-1.5 text-xs font-semibold capitalize transition-colors ${
+                                        tab === t ? 'border-brand-500 text-ink' : 'border-transparent text-ink-3 hover:text-ink-2'
+                                    }`}
+                                >
+                                    {t}
+                                </button>
+                            ))}
+                        </div>
                     )}
 
-                    {cell.evidence && <EvidenceCard evidence={cell.evidence} />}
+                    {tab === 'code' && step?.code ? (
+                        <>
+                            <p className="text-xs text-ink-3">
+                                <span className="font-mono text-ink-2">learn()</span> looks at the training rows once;{' '}
+                                <span className="font-mono text-ink-2">apply()</span> uses what it learned on training rows, the test set and new customers.
+                            </p>
+                            <CodeView code={step.code} />
+                        </>
+                    ) : (
+                        <>
+                            <p className="whitespace-pre-wrap text-sm text-ink-2">{step?.message || cell.message}</p>
+
+                            {step && kind === 'learn' && <StickyNoteView learned={step.learned} />}
+                            {kind === 'train_only' && !removed && (
+                                <p className="text-xs text-ink-3">Applied to the training rows only; skipped for the test set and new customers.</p>
+                            )}
+
+                            {cell.evidence && <EvidenceCard evidence={cell.evidence} />}
+                        </>
+                    )}
                 </div>
             </div>
         </div>
