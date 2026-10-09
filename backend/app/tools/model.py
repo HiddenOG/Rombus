@@ -1,5 +1,6 @@
 """Model tools — training, prediction, AutoML, and SHAP explanations."""
 
+import copy
 import pandas as pd
 import numpy as np
 import pickle
@@ -108,6 +109,44 @@ def target_classes(session: DataSession) -> Optional[List[str]]:
     return None
 
 
+def fit_and_score(session: DataSession, name: str, model: Any, cv_folds: int) -> Dict[str, Any]:
+    """Train one model on the practice split, score it, and remember it. Shared by built-in and custom models."""
+    model.fit(session.X_train, session.y_train)
+    y_pred = model.predict(session.X_test)
+
+    if session.problem_type == "regression":
+        result = {
+            "model": name,
+            "r2_score": round(float(r2_score(session.y_test, y_pred)), 4),
+            "mae": round(float(mean_absolute_error(session.y_test, y_pred)), 4),
+            "rmse": round(float(np.sqrt(mean_squared_error(session.y_test, y_pred))), 4),
+        }
+    else:
+        result = {
+            "model": name,
+            "accuracy": round(float(accuracy_score(session.y_test, y_pred)), 4),
+            "f1_score": round(float(f1_score(session.y_test, y_pred, average="weighted", zero_division=0)), 4),
+            "report": classification_report(session.y_test, y_pred, zero_division=0),
+        }
+
+    # Cross-validation: several mini-exams within the training part
+    cv_scores = cross_val_score(model, session.X_train, session.y_train, cv=cv_folds)
+    result["cv_mean"] = round(float(cv_scores.mean()), 4)
+    result["cv_std"] = round(float(cv_scores.std()), 4)
+
+    session.trained_models[name] = model
+    session.model_results[name] = result
+    return result
+
+
+def finish_training(session: DataSession, results: List[Dict[str, Any]]) -> Optional[str]:
+    """Pick the best result by practice score and move the stage on."""
+    scored = [r for r in results if "cv_mean" in r]
+    if session.current_stage in ("ACQUIRE", "SCRUB", "EXPLORE"):
+        session.current_stage = "MODEL"
+    return max(scored, key=lambda r: r["cv_mean"])["model"] if scored else None
+
+
 def best_model_name(session: DataSession) -> str:
     """The trained model with the best practice (cross-validation) score."""
     scored = {a: r.get("cv_mean", float("-inf")) for a, r in session.model_results.items() if a in session.trained_models}
@@ -204,39 +243,9 @@ def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
             available = ", ".join(model_registry.keys())
             results.append({"model": alg, "error": f"Unknown algorithm. Available: {available}"})
             continue
+        results.append(fit_and_score(session, alg, model_registry[alg](), cv_folds))
 
-        model = model_registry[alg]()
-        model.fit(session.X_train, session.y_train)
-        y_pred = model.predict(session.X_test)
-
-        if session.problem_type == "regression":
-            score = round(float(r2_score(session.y_test, y_pred)), 4)
-            mae = round(float(mean_absolute_error(session.y_test, y_pred)), 4)
-            rmse = round(float(np.sqrt(mean_squared_error(session.y_test, y_pred))), 4)
-            result = {"model": alg, "r2_score": score, "mae": mae, "rmse": rmse}
-        else:
-            acc = round(float(accuracy_score(session.y_test, y_pred)), 4)
-            f1 = round(float(f1_score(session.y_test, y_pred, average='weighted', zero_division=0)), 4)
-            report = classification_report(session.y_test, y_pred, zero_division=0)
-            result = {"model": alg, "accuracy": acc, "f1_score": f1, "report": report}
-
-        # Cross-validation
-        cv_scores = cross_val_score(model, session.X_train, session.y_train, cv=cv_folds)
-        result["cv_mean"] = round(float(cv_scores.mean()), 4)
-        result["cv_std"] = round(float(cv_scores.std()), 4)
-
-        session.trained_models[alg] = model
-        session.model_results[alg] = result
-        results.append(result)
-
-    # Find best model
-    score_key = "cv_mean"
-    valid_results = [r for r in results if score_key in r]
-    best = max(valid_results, key=lambda r: r[score_key])["model"] if valid_results else None
-
-    if session.current_stage in ("ACQUIRE", "SCRUB", "EXPLORE"):
-        session.current_stage = "MODEL"
-
+    best = finish_training(session, results)
     msg = f"Trained {len(alg_names)} models. Best on the practice split: {best}."
     if auto_split:
         msg = f"{auto_split} {msg}"
@@ -321,7 +330,11 @@ def final_exam(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     # 1. The final model learns from ALL training rows (the practice split was only for choosing)
     X_all = model_features(session.df, target)
     y_all = session.df[target]
-    model = clone(session.trained_models[name]).fit(X_all, y_all)
+    try:
+        fresh = clone(session.trained_models[name])
+    except TypeError:  # custom models that don't follow scikit-learn's conventions
+        fresh = copy.deepcopy(session.trained_models[name])
+    model = fresh.fit(X_all, y_all)
 
     # 2. The locked rows go through the recipe with the TRAINING sticky notes: no learning from them
     prepared = session.prepare(session.test_df)

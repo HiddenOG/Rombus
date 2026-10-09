@@ -14,6 +14,16 @@ export function EvidenceCard({ evidence }) {
 
             {evidence.preview && <PreviewTable data={evidence.preview} />}
 
+            {evidence.output && (
+                <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-xl border border-line bg-surface-2 p-3 font-mono text-[12px] leading-relaxed text-ink">
+                    {evidence.output}
+                </pre>
+            )}
+
+            {evidence.images?.map((src, i) => (
+                <img key={i} src={src} alt={`Chart ${i + 1} from your code`} className="max-w-full rounded-xl border border-line bg-surface" />
+            ))}
+
             {evidence.describe && <DescribeTable data={evidence.describe} />}
 
             {evidence.info && (

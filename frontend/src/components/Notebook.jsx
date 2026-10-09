@@ -48,7 +48,7 @@ export function Notebook({ nb }) {
                         }
                         return (
                             <RunCell
-                                key={cell.id}
+                                key={`${cell.id}-${cell.tool}`}
                                 cell={cell}
                                 number={numbers[cell.id]}
                                 tool={tools[cell.tool]}
@@ -59,6 +59,8 @@ export function Notebook({ nb }) {
                                 onEdit={nb.editStep}
                                 onEditCode={nb.editCode}
                                 onRevert={nb.revertCell}
+                                onCustomize={nb.customizeCell}
+                                onRevertAction={nb.revertAction}
                                 onCopy={nb.copyCell}
                                 onDelete={nb.deleteCell}
                                 onRerun={nb.rerun}

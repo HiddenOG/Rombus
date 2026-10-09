@@ -93,9 +93,9 @@ class CodeRequest(BaseModel):
 
 @router.post("/session/{session_id}/code")
 async def show_code(session_id: str, body: CodeRequest, _: str = Depends(verify_api_key)):
-    """Equivalent Python for an action or view cell (recipe steps carry their own code)."""
-    from app.action_code import action_code
-    return {"code": action_code(_session(session_id), body.tool, body.args)}
+    """Code for an action or view cell, and whether it can be edited (recipe steps carry their own code)."""
+    from app.action_code import code_info
+    return code_info(_session(session_id), body.tool, body.args)
 
 
 class CodeUpdate(BaseModel):

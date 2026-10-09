@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import Markdown from 'react-markdown';
-import { Pencil, Copy, Trash2, RotateCw, Info, StickyNote, AlertTriangle, Loader2, Ban } from 'lucide-react';
+import { Pencil, Copy, Trash2, RotateCw, Info, StickyNote, AlertTriangle, Loader2, Ban, Lock } from 'lucide-react';
 import { Logo } from './Logo';
 import { ActionButton } from './ActionButton';
 import { EvidenceCard } from './EvidenceCard';
@@ -75,22 +75,34 @@ export function AskCell({ cell, number, onRun, isProcessing }) {
     );
 }
 
-export function RunCell({ cell, number, tool, step, summary, sessionId, isProcessing, onEdit, onEditCode, onRevert, onCopy, onDelete, onRerun }) {
+export function RunCell({ cell, number, tool, step, summary, sessionId, isProcessing, onEdit, onEditCode, onRevert, onCustomize, onRevertAction, onCopy, onDelete, onRerun }) {
     const [editing, setEditing] = useState(false);
     const [tab, setTab] = useState('result');
     const [editingCode, setEditingCode] = useState(false);
-    const [actionCode, setActionCode] = useState(null);
+    const [codeInfo, setCodeInfo] = useState(null); // {code, custom_tool, template, protected} for actions/views
     const kind = tool?.kind || 'view';
+    // An action or view whose built-in code was replaced by the user's own
+    const customAction = cell.tool === 'custom_view' || cell.tool === 'custom_models';
+
+    const loadCode = async () => {
+        try {
+            setCodeInfo(await getActionCode(sessionId, cell.tool, cell.args || {}));
+        } catch (err) {
+            setCodeInfo({ code: `# Couldn't load the code: ${err.message}` });
+        }
+    };
 
     // Actions and views get their code from the server the first time the Code tab is opened
-    const openTab = async (t) => {
+    const openTab = (t) => {
         setTab(t);
-        if (t === 'code' && !cell.stepId && !actionCode) {
-            try {
-                setActionCode((await getActionCode(sessionId, cell.tool, cell.args || {})).code);
-            } catch (err) {
-                setActionCode(`# Couldn't load the code: ${err.message}`);
-            }
+        if (t === 'code' && !cell.stepId && !codeInfo) loadCode();
+    };
+
+    const saveActionCode = async (code) => {
+        if (await onCustomize(cell, codeInfo.custom_tool, code)) {
+            setEditingCode(false);
+            setCodeInfo(null);
+            setTab('result');
         }
     };
     const isStep = Boolean(cell.stepId);
@@ -131,9 +143,21 @@ export function RunCell({ cell, number, tool, step, summary, sessionId, isProces
                             {step?.based_on && (
                                 <span className="text-xs text-ink-3">(was {humanize(step.based_on.tool)})</span>
                             )}
-                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${KIND[kind]?.className}`}>
-                                {KIND[kind]?.label}
+                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${KIND[customAction ? 'custom' : kind]?.className}`}>
+                                {KIND[customAction ? 'custom' : kind]?.label}
                             </span>
+                            {customAction && cell.args?.based_on && (
+                                <>
+                                    <span className="text-xs text-ink-3">(was {humanize(cell.args.based_on.tool)})</span>
+                                    <button
+                                        onClick={() => onRevertAction(cell)}
+                                        disabled={isProcessing}
+                                        className="text-xs font-semibold text-amber-800 hover:underline disabled:opacity-50"
+                                    >
+                                        Revert to built-in
+                                    </button>
+                                </>
+                            )}
                             {removed && (
                                 <span className="flex items-center gap-1 rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[10px] font-semibold text-ink-3">
                                     <Ban className="h-3 w-3" /> No longer in the recipe
@@ -231,16 +255,45 @@ export function RunCell({ cell, number, tool, step, summary, sessionId, isProces
                     )}
 
                     {tab === 'code' && !isStep ? (
-                        <>
-                            <p className="text-xs text-ink-3">
-                                The equivalent Python for what this {kind === 'view' ? 'view' : 'action'} did, with your settings.
-                                Names like <span className="font-mono text-ink-2">train</span>, <span className="font-mono text-ink-2">recipe</span> and{' '}
-                                <span className="font-mono text-ink-2">model</span> refer to earlier cells.
-                            </p>
-                            {actionCode ? <CodeView code={actionCode} /> : (
-                                <p className="flex items-center gap-2 text-sm text-ink-3"><Loader2 className="h-4 w-4 animate-spin" /> Loading code…</p>
-                            )}
-                        </>
+                        !codeInfo ? (
+                            <p className="flex items-center gap-2 text-sm text-ink-3"><Loader2 className="h-4 w-4 animate-spin" /> Loading code…</p>
+                        ) : editingCode && codeInfo.custom_tool ? (
+                            <CodeEditor
+                                initialCode={codeInfo.template}
+                                busy={isProcessing}
+                                saveLabel="Run my code"
+                                onSave={saveActionCode}
+                                onCancel={() => setEditingCode(false)}
+                            />
+                        ) : (
+                            <>
+                                <div className="flex items-start justify-between gap-3">
+                                    <p className="text-xs text-ink-3">
+                                        {customAction
+                                            ? 'Your own code for this cell.'
+                                            : <>The equivalent Python for what this {kind === 'view' ? 'view' : 'action'} did, with your settings.
+                                                Names like <span className="font-mono text-ink-2">train</span>, <span className="font-mono text-ink-2">recipe</span> and{' '}
+                                                <span className="font-mono text-ink-2">model</span> refer to earlier cells.</>}
+                                    </p>
+                                    {codeInfo.custom_tool && (
+                                        <button
+                                            onClick={() => setEditingCode(true)}
+                                            disabled={isProcessing}
+                                            className="flex shrink-0 items-center gap-1 rounded-lg border border-line px-2 py-1 text-xs font-semibold text-ink-2 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
+                                        >
+                                            <Pencil className="h-3 w-3" /> Edit code
+                                        </button>
+                                    )}
+                                </div>
+                                {codeInfo.protected && (
+                                    <p className="flex items-start gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-xs text-ink-2">
+                                        <Lock className="mt-px h-3.5 w-3.5 shrink-0 text-ink-3" />
+                                        <span><strong>Protected.</strong> {codeInfo.protected} Change its settings with the normal buttons instead.</span>
+                                    </p>
+                                )}
+                                <CodeView code={codeInfo.code} />
+                            </>
+                        )
                     ) : tab === 'code' && step?.code ? (
                         editingCode ? (
                             <CodeEditor

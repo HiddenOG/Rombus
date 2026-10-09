@@ -26,7 +26,8 @@ def session():
 
 
 def test_every_non_recipe_tool_has_a_code_view():
-    assert set(TOOL_REGISTRY) - set(STEP_TYPES) <= set(BUILDERS)
+    custom = {"custom_view", "custom_models"}  # their code is the user's own (see code_info)
+    assert set(TOOL_REGISTRY) - set(STEP_TYPES) - custom <= set(BUILDERS)
 
 
 ARGS = {

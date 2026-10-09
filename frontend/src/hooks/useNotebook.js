@@ -211,6 +211,38 @@ export function useNotebook() {
         return true;
     });
 
+    // Actions and views: run your own code in this cell's place (remembering what it was, for Revert)
+    const customizeCell = (cell, customTool, code) => busy(async () => {
+        const basedOn = cell.tool.startsWith('custom_') ? cell.args?.based_on : { tool: cell.tool, args: cell.args };
+        const args = { code, ...(basedOn ? { based_on: basedOn } : {}) };
+        const data = await api.executeAction(sessionId, customTool, args);
+        if (!data.success) {
+            setError(data.message || 'Your code failed.');
+            return false;
+        }
+        setSummary(data.new_state_summary);
+        patchCell(cell.id, {
+            tool: customTool, args, message: data.message, evidence: data.evidence,
+            version: data.new_state_summary?.data_version,
+        });
+        return true;
+    });
+
+    const revertAction = (cell) => busy(async () => {
+        const original = cell.args?.based_on;
+        if (!original) return;
+        const data = await api.executeAction(sessionId, original.tool, original.args || {});
+        if (!data.success) {
+            setError(data.message || 'Revert failed.');
+            return;
+        }
+        setSummary(data.new_state_summary);
+        patchCell(cell.id, {
+            tool: original.tool, args: original.args || {}, message: data.message, evidence: data.evidence,
+            version: data.new_state_summary?.data_version,
+        });
+    });
+
     const revertCell = (cell) => busy(async () => {
         const data = await api.revertStep(sessionId, cell.stepId);
         setSummary(data.new_state_summary);
@@ -247,6 +279,8 @@ export function useNotebook() {
         editStep,
         editCode,
         revertCell,
+        customizeCell,
+        revertAction,
         deleteCell,
         copyCell,
         openNotebook,

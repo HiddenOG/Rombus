@@ -61,67 +61,72 @@ train, test = train_test_split(
 ''')
 
 
+# Views end by setting `result`, so the code shown is directly runnable as a custom view.
+VIEW_NOTE = "# `result` is what gets shown. Uncomment a .plot line to draw a chart (needs matplotlib).\n"
+
+
 @builder("preview_data")
 def _preview(session, args):
     rows = int(args.get("rows") or 5)
-    return HEADER + TRAIN_NOTE + f"\ntrain.head({rows})"
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + f"\nresult = train.head({rows})"
 
 
 @builder("get_data_info")
 def _info(session, args):
-    return HEADER + TRAIN_NOTE + "\ntrain.info()\ntrain.describe(include='all')"
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + "\ntrain.info()  # column types and non-blank counts\nresult = train.describe(include='all')"
 
 
 @builder("check_duplicates")
 def _duplicates(session, args):
-    return HEADER + TRAIN_NOTE + "\nprint(train.duplicated().sum(), 'duplicate rows')"
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + "\nresult = f\"{train.duplicated().sum()} duplicate rows out of {len(train)}\""
 
 
 @builder("plot_histogram")
 def _histogram(session, args):
     col = args.get("column")
-    return HEADER + TRAIN_NOTE + "\n" + _code(f'''
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + _code(f'''
 values = train[{col!r}].dropna()
 if pd.api.types.is_numeric_dtype(values):
     bins = min(30, max(10, len(values) // 10))
     counts, edges = np.histogram(values, bins=bins)  # how many rows fall in each range
+    result = pd.DataFrame({{"from": edges[:-1].round(2), "to": edges[1:].round(2), "rows": counts}})
+    # values.plot.hist(bins=bins)
 else:
-    counts = values.value_counts().head(20)  # text columns: count each category
-
-# To draw it yourself: values.plot.hist(bins=bins)  or  counts.plot.bar()
+    result = values.value_counts().head(20)  # text columns: count each category
+    # result.plot.bar()
 ''')
 
 
 @builder("plot_boxplot")
 def _boxplot(session, args):
     col = args.get("column")
-    return HEADER + TRAIN_NOTE + "\n" + _code(f'''
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + _code(f'''
 values = train[{col!r}].dropna()
 q1, median, q3 = values.quantile(0.25), values.median(), values.quantile(0.75)
 iqr = q3 - q1
 outliers = values[(values < q1 - 1.5 * iqr) | (values > q3 + 1.5 * iqr)]  # beyond the whiskers
-
-# To draw it yourself: values.plot.box()
+result = pd.Series({{"min": values.min(), "q1": q1, "median": median, "q3": q3, "max": values.max(),
+                    "outliers": len(outliers)}})
+# values.plot.box()
 ''')
 
 
 @builder("plot_correlation")
 def _correlation(session, args):
-    return HEADER + TRAIN_NOTE + "\n" + _code('''
-corr = train.select_dtypes(include="number").corr()  # -1 opposite … 0 unrelated … +1 together
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + _code('''
+result = train.select_dtypes(include="number").corr().round(2)  # -1 opposite … 0 unrelated … +1 together
 ''')
 
 
 @builder("plot_scatterplot")
 def _scatter(session, args):
     x, y, hue = args.get("x"), args.get("y"), args.get("hue")
-    cols = [c for c in (x, y, hue) if c]
-    return HEADER + TRAIN_NOTE + "\n" + _code(f'''
-points = train[{cols!r}].dropna()
-if len(points) > 500:
-    points = points.sample(500, random_state=42)  # keep the chart fast
-
-# To draw it yourself: points.plot.scatter(x={x!r}, y={y!r})
+    cols = list(dict.fromkeys(c for c in (x, y, hue) if c))
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + _code(f'''
+result = train[{cols!r}].dropna()
+if len(result) > 500:
+    result = result.sample(500, random_state=42)  # keep the chart fast
+# result.plot.scatter(x={x!r}, y={y!r})
 ''')
 
 
@@ -286,3 +291,38 @@ def action_code(session: DataSession, tool: str, args: Dict[str, Any]) -> str:
     if build is None:
         return f"# No code view for '{tool}' yet."
     return build(session, args or {})
+
+
+VIEW_TOOLS = {"preview_data", "get_data_info", "check_duplicates", "plot_histogram", "plot_boxplot",
+              "plot_correlation", "plot_scatterplot"}
+
+# The referee: their code is shown but can't be edited, or their guarantees would mean nothing
+PROTECTED = {
+    "select_target": "This is the lock. If its code could be edited, you could choose which rows end up in the exam.",
+    "final_exam": "This is the referee. If its code could be edited, you could change how the honest score is calculated.",
+    "predict": "Predictions always go through the recipe and model exactly as trained, so they match the exam.",
+}
+
+
+def models_template(session: DataSession, algorithms) -> str:
+    """Editable starting point for custom models: the cell's own models, written out."""
+    algorithms = algorithms or ["rf", "gb"]
+    return (_sklearn_imports(session, algorithms) + "\n\n"
+            + "# Define the models to compare as {name: model}. Any scikit-learn-style model works.\n"
+            + "# Change settings, add models, or remove some. The app trains and scores them like built-ins.\n\n"
+            + f"models = {_model_lines(session, algorithms)}\n")
+
+
+def code_info(session: DataSession, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """The code for a cell, and whether / how it can be edited."""
+    args = args or {}
+    if tool in ("custom_view", "custom_models"):
+        code = args.get("code", "")
+        return {"code": code, "custom_tool": tool, "template": code, "protected": None}
+    code = action_code(session, tool, args)
+    if tool in VIEW_TOOLS:
+        return {"code": code, "custom_tool": "custom_view", "template": code, "protected": None}
+    if tool in ("train_models", "auto_ml"):
+        return {"code": code, "custom_tool": "custom_models", "template": models_template(session, args.get("algorithms")),
+                "protected": None}
+    return {"code": code, "custom_tool": None, "template": None, "protected": PROTECTED.get(tool)}
