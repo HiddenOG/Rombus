@@ -35,6 +35,25 @@ export function EvidenceCard({ evidence }) {
                             Model: <span className="font-mono uppercase">{evidence.model_used}</span>
                         </div>
                     )}
+                    {evidence.probabilities && (
+                        <div className="mt-3 space-y-1.5">
+                            <p className="text-xs font-semibold text-ink-2">How sure the model is</p>
+                            {Object.entries(evidence.probabilities)
+                                .sort((a, b) => b[1] - a[1])
+                                .map(([label, p]) => (
+                                    <div key={label} className="flex items-center gap-2 text-xs">
+                                        <span className="w-20 truncate font-mono text-ink" title={label}>{label}</span>
+                                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface">
+                                            <div
+                                                className={`h-full rounded-full ${label === evidence.prediction ? 'bg-brand-500' : 'bg-ink-3/40'}`}
+                                                style={{ width: `${p * 100}%` }}
+                                            />
+                                        </div>
+                                        <span className="w-12 text-right font-mono tabular-nums text-ink-2">{(p * 100).toFixed(0)}%</span>
+                                    </div>
+                                ))}
+                        </div>
+                    )}
                 </div>
             )}
         </div>

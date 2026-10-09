@@ -78,6 +78,27 @@ def test_flags_a_model_that_only_guesses_the_common_answer():
     assert "no better than just guessing" in result["message"]
 
 
+def test_prediction_form_fields_come_from_raw_training_rows(churn):
+    fields = {f["name"]: f for f in churn.get_summary()["raw_features"]}
+    assert set(fields) == {"visits", "plan", "age"}  # original columns, not the one-hot ones; no target
+    assert fields["plan"]["kind"] == "category" and set(fields["plan"]["options"]) == {"basic", "pro"}
+    assert fields["visits"]["kind"] == "number"
+    assert fields["visits"]["typical"] == float(churn.raw_train["visits"].median())
+
+    run(churn, "remove_columns", columns=["age"])
+    assert "age" not in {f["name"] for f in churn.get_summary()["raw_features"]}  # removed columns aren't asked for
+
+
+def test_prediction_includes_confidence(churn):
+    run(churn, "train_models", algorithms=["lr", "dt"])
+    result = run(churn, "predict", features={"visits": 2, "plan": "basic", "age": 40})
+    probs = result["evidence"]["probabilities"]
+    assert set(probs) == {"yes", "no"}
+    assert abs(sum(probs.values()) - 1) < 1e-6
+    assert result["evidence"]["prediction"] == "yes"  # few visits -> churns
+    assert "Confidence" in result["message"]
+
+
 def test_exam_needs_a_trained_model(churn):
     result = execute_tool("final_exam", churn, {})
     assert not result["success"] and "Train at least one model" in result["message"]

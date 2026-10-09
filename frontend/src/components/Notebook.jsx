@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Loader2, ArrowUp, AlertCircle, X, Lock, LineChart, Wand2, Plus, Sparkles } from 'lucide-react';
+import { Loader2, ArrowUp, AlertCircle, X, Lock, LineChart, Wand2, Plus, Sparkles, Target } from 'lucide-react';
+import { PredictForm } from './PredictForm';
 import { StageProgress } from './StageProgress';
 import { Logo } from './Logo';
 import { NoteCell, AskCell, RunCell } from './Cells';
@@ -78,6 +79,8 @@ function CommandBar({ nb }) {
     const [adding, setAdding] = useState(false);
     const [toolName, setToolName] = useState('');
 
+    const [predicting, setPredicting] = useState(false);
+    const canPredict = summary?.trained_models?.length > 0 && summary?.raw_features?.length > 0;
     const available = Object.values(tools).filter(t => summary?.is_split || t.before_split);
     const submit = (e) => {
         e.preventDefault();
@@ -96,6 +99,24 @@ function CommandBar({ nb }) {
                         <button onClick={nb.clearError} aria-label="Dismiss error" className="rounded-full p-1 hover:bg-red-100">
                             <X className="h-4 w-4" />
                         </button>
+                    </div>
+                )}
+
+                {predicting && canPredict && (
+                    <div className="rounded-2xl border border-line bg-surface p-3.5 shadow-[0_2px_12px_rgba(28,25,23,0.06)] animate-in">
+                        <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
+                            <Target className="h-4 w-4 text-brand-600" /> Predict a new case
+                        </p>
+                        <PredictForm
+                            fields={summary.raw_features}
+                            models={summary.trained_models}
+                            busy={isProcessing}
+                            onCancel={() => setPredicting(false)}
+                            onPredict={args => {
+                                nb.run({ tool: 'predict', arguments: args });
+                                setPredicting(false);
+                            }}
+                        />
                     </div>
                 )}
 
@@ -164,9 +185,14 @@ function CommandBar({ nb }) {
                         <QuickButton onClick={() => nb.ask('What should I do next?')} disabled={!sessionId || isProcessing}>
                             <Sparkles className="h-3.5 w-3.5" /> Suggest next step
                         </QuickButton>
-                        <QuickButton onClick={() => setAdding(a => !a)} disabled={!sessionId || isProcessing}>
+                        <QuickButton onClick={() => { setAdding(a => !a); setPredicting(false); }} disabled={!sessionId || isProcessing}>
                             <Plus className="h-3.5 w-3.5" /> Add step
                         </QuickButton>
+                        {canPredict && (
+                            <QuickButton onClick={() => { setPredicting(p => !p); setAdding(false); }} disabled={isProcessing}>
+                                <Target className="h-3.5 w-3.5" /> Predict
+                            </QuickButton>
+                        )}
                     </div>
                     <p className="text-xs text-ink-3">Nothing changes until you press Run.</p>
                 </div>

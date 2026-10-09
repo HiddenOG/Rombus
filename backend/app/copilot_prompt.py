@@ -37,19 +37,51 @@ INSTRUCTIONS:
 """.strip()
 
 
+# What the AI is offered in each phase. Every tool description costs reading time (on a laptop
+# CPU, ~45 s per 1,000 tokens), so the AI only sees the tools that fit where the notebook is.
+# People can still run any step themselves with "Add step".
+LOOK = ["preview_data", "get_data_info", "check_duplicates", "plot_histogram", "plot_boxplot",
+        "plot_correlation", "plot_scatterplot"]
+CLEAN = ["remove_columns", "remove_duplicates", "clean_numeric_string", "standardize_text", "impute_missing",
+         "impute_all_missing", "encode_categorical", "encode_all_categorical", "scale_all_features", "log_transform"]
+MODEL = ["train_models", "auto_ml", "final_exam", "predict", "explain_model", "save_model"]
+
+PHASE_TOOLS = {
+    # Re-locking the test rows is never offered: repeated re-locks are how a "lucky split" gets shopped for
+    "cleaning": CLEAN + LOOK + ["train_models", "undo"],
+    "modeling": MODEL + ["preview_data", "plot_correlation", "undo"],
+}
+
+
+def phase(session: DataSession) -> str:
+    if not session.is_split:
+        return "before_lock"
+    return "modeling" if session.trained_models else "cleaning"
+
+
 def tool_specs_for(session: Optional[DataSession] = None) -> List[Dict[str, Any]]:
-    """Tool schemas (each with a required 'explanation'); only the tools usable right now if a session is given."""
+    """Tool schemas (each with a required 'explanation') for the AI.
+
+    With a session: only tools usable right now (the lock gate) and fitting the current phase.
+    """
     names = available_tools(session) if session else list(TOOL_SPECS)
+    if session and phase(session) in PHASE_TOOLS:
+        allowed = set(PHASE_TOOLS[phase(session)])
+        names = [n for n in names if n in allowed]
     names = [n for n in names if n not in HIDDEN_FROM_AI]
     specs = []
     for spec in (TOOL_SPECS[n] for n in names):
         params = copy.deepcopy(spec["parameters"])
-        params["properties"]["explanation"] = {
-            "type": "string",
-            "description": "One sentence telling the user why this action helps right now.",
-        }
+        params["properties"]["explanation"] = {"type": "string", "description": "Why, in one sentence."}
+        description = spec["description"]
+        if spec["name"] == "train_models" and session and session.problem_type:
+            # Only offer algorithms that fit the problem (the eval caught regression models offered for yes/no)
+            from app.tools.model import CLASSIFICATION_MODELS, REGRESSION_MODELS
+            fitting = CLASSIFICATION_MODELS if session.problem_type == "classification" else REGRESSION_MODELS
+            params["properties"]["algorithms"]["items"]["enum"] = sorted(fitting)
+            description = f"Train and cross-validate {session.problem_type} models."
         params["required"] = [*params["required"], "explanation"]
-        specs.append({"name": spec["name"], "description": spec["description"], "parameters": params})
+        specs.append({"name": spec["name"], "description": description, "parameters": params})
     return specs
 
 

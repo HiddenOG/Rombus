@@ -109,8 +109,8 @@ def categorical_columns(df: pd.DataFrame) -> List[str]:
 
 
 # Reusable schema fragments
-COLUMN = {"type": "string", "description": "Exact column name from the dataset."}
-COLUMNS = {"type": "array", "items": {"type": "string"}, "description": "Exact column names from the dataset."}
+COLUMN = {"type": "string", "description": "Exact column name."}
+COLUMNS = {"type": "array", "items": {"type": "string"}, "description": "Exact column names."}
 
 
 # Import all tool modules to trigger registration

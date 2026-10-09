@@ -129,7 +129,7 @@ export function RunCell({ cell, number, tool, step, summary, isProcessing, onEdi
                         {Object.keys(args).length > 0 && (
                             <div className="mt-1.5 flex flex-wrap gap-1.5">
                                 {Object.entries(args).map(([k, v]) => (
-                                    <span key={k} className="rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-ink-2">
+                                    <span key={k} className="max-w-full break-all rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-ink-2">
                                         {humanize(k)}: <span className="text-ink">{Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
                                     </span>
                                 ))}

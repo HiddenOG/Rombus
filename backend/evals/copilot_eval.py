@@ -152,7 +152,7 @@ async def run_case(case: Case) -> Dict:
 
 async def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--provider", choices=["gemini", "ollama"], default=settings.AI_PROVIDER)
+    parser.add_argument("--provider", choices=["gemini", "ollama", "openai_compatible"], default=settings.AI_PROVIDER)
     parser.add_argument("--model", help="model name (defaults to the configured one)")
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--cases", help="comma-separated case names to run (default: all)")
@@ -162,6 +162,9 @@ async def main():
     if opts.provider == "ollama":
         settings.OLLAMA_MODEL = opts.model or settings.OLLAMA_MODEL
         model = settings.OLLAMA_MODEL
+    elif opts.provider == "openai_compatible":
+        settings.AI_MODEL = opts.model or settings.AI_MODEL
+        model = settings.AI_MODEL
     else:
         settings.GEMINI_MODEL = opts.model or settings.GEMINI_MODEL
         settings.GEMINI_FALLBACK_MODELS = ""  # judge one model at a time

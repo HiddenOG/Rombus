@@ -108,6 +108,12 @@ def target_classes(session: DataSession) -> Optional[List[str]]:
     return None
 
 
+def best_model_name(session: DataSession) -> str:
+    """The trained model with the best practice (cross-validation) score."""
+    scored = {a: r.get("cv_mean", float("-inf")) for a, r in session.model_results.items() if a in session.trained_models}
+    return max(scored, key=scored.get) if scored else next(iter(session.trained_models))
+
+
 def ensure_practice_split(session: DataSession) -> str:
     """Do the default practice split if there isn't one yet; returns a note when it did."""
     if session.X_train is not None:
@@ -228,6 +234,9 @@ def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     valid_results = [r for r in results if score_key in r]
     best = max(valid_results, key=lambda r: r[score_key])["model"] if valid_results else None
 
+    if session.current_stage in ("ACQUIRE", "SCRUB", "EXPLORE"):
+        session.current_stage = "MODEL"
+
     msg = f"Trained {len(alg_names)} models. Best on the practice split: {best}."
     if auto_split:
         msg = f"{auto_split} {msg}"
@@ -304,8 +313,7 @@ def final_exam(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     if not session.trained_models:
         return {"success": False, "message": "Train at least one model first."}
 
-    scored = {a: r.get("cv_mean", float("-inf")) for a, r in session.model_results.items()}
-    name = args.get("algorithm") or (max(scored, key=scored.get) if scored else next(iter(session.trained_models)))
+    name = args.get("algorithm") or best_model_name(session)
     if name not in session.trained_models:
         return {"success": False, "message": f"Model '{name}' isn't trained. Trained: {list(session.trained_models)}."}
 
@@ -387,7 +395,7 @@ def predict(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     if not session.trained_models:
         return {"success": False, "message": "Train models first."}
 
-    model_name = args.get("algorithm", list(session.trained_models.keys())[0])
+    model_name = args.get("algorithm") or best_model_name(session)
     if model_name not in session.trained_models:
         return {"success": False, "message": f"Model '{model_name}' not found. Available: {list(session.trained_models.keys())}"}
 
@@ -411,13 +419,26 @@ def predict(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         prediction = classes[int(prediction)]
     prediction = prediction.item() if hasattr(prediction, "item") else prediction
 
+    # How sure is the model? (classification models that can say)
+    probabilities = None
+    if session.problem_type == "classification" and hasattr(model, "predict_proba"):
+        labels = [classes[int(c)] if classes is not None and 0 <= int(c) < len(classes) else c for c in model.classes_]
+        probabilities = {str(label): round(float(p), 4) for label, p in zip(labels, model.predict_proba(X)[0])}
+
     msg = f"Prediction: {prediction} (using {model_name})."
+    if probabilities:
+        msg += f" Confidence: {probabilities.get(str(prediction), 0):.0%}."
     if missing:
         msg += f" Not provided, so treated as blank: {', '.join(missing)}."
     return {
         "success": True,
         "message": msg,
-        "evidence": {"prediction": str(prediction), "model_used": model_name, "input_features": features},
+        "evidence": {
+            "prediction": str(prediction),
+            "model_used": model_name,
+            "input_features": features,
+            "probabilities": probabilities,
+        },
     }
 
 
@@ -427,7 +448,7 @@ def explain_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     if not session.trained_models:
         return {"success": False, "message": "Train models first."}
 
-    model_name = args.get("algorithm", list(session.trained_models.keys())[0])
+    model_name = args.get("algorithm") or best_model_name(session)
     if model_name not in session.trained_models:
         return {"success": False, "message": f"Model '{model_name}' not found."}
 
@@ -495,7 +516,7 @@ def save_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     if not session.trained_models:
         return {"success": False, "message": "No trained models to save."}
 
-    model_name = args.get("algorithm", list(session.trained_models.keys())[0])
+    model_name = args.get("algorithm") or best_model_name(session)
     if model_name not in session.trained_models:
         return {"success": False, "message": f"Model '{model_name}' not found."}
 

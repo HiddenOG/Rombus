@@ -121,6 +121,30 @@ class TestFailures:
         assert ask(session)["response"] == ollama_client.SLOW_MESSAGE
 
 
+class TestPhaseTools:
+    def _names(self, session):
+        return {t["function"]["name"] for t in ollama_client.build_tools(session)}
+
+    def test_cleaning_phase(self, session):
+        from app.tools import execute_tool
+        assert execute_tool("select_target", session, {"column": "churned"})["success"]
+        names = self._names(session)
+        assert "impute_all_missing" in names and "train_models" in names
+        assert "select_target" not in names  # re-locking is never offered by the AI
+        assert "final_exam" not in names and "custom_code" not in names
+
+    def test_modeling_phase_and_matching_algorithms(self):
+        from app.tools import execute_tool
+        df = pd.DataFrame({"x": range(40), "churned": ["yes", "no"] * 20})
+        s = DataSession(df, "d.csv")
+        execute_tool("select_target", s, {"column": "churned"})
+        execute_tool("train_models", s, {"algorithms": ["lr"], "cv_folds": 2})
+        tools = {t["function"]["name"]: t["function"] for t in ollama_client.build_tools(s)}
+        assert "final_exam" in tools and "predict" in tools
+        enum = tools["train_models"]["parameters"]["properties"]["algorithms"]["items"]["enum"]
+        assert "lr" in enum and "ridge" not in enum  # classification only
+
+
 def test_provider_switch(monkeypatch, session):
     from app import copilot
 

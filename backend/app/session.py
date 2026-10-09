@@ -161,6 +161,38 @@ class DataSession:
                          sort_keys=True, default=str)
         return hashlib.sha1(key.encode()).hexdigest()[:10]
 
+    def raw_features(self) -> List[Dict[str, Any]]:
+        """The original input columns (before any cleaning), for the prediction form.
+
+        Typical values and options come from the raw TRAINING rows only.
+        """
+        if self.raw_train is None:
+            return []
+        # Columns the recipe throws away don't need to be asked for
+        removed = {c for l in self.recipe if l.tool == "remove_columns" for c in l.args.get("columns", [])}
+        fields = []
+        for col in self.raw_train.columns:
+            if col == self.target_column or col in removed:
+                continue
+            series = self.raw_train[col].dropna()
+            if pd.api.types.is_numeric_dtype(series):
+                fields.append({
+                    "name": col,
+                    "kind": "number",
+                    "typical": round(float(series.median()), 4) if len(series) else None,
+                    "min": round(float(series.min()), 4) if len(series) else None,
+                    "max": round(float(series.max()), 4) if len(series) else None,
+                })
+            else:
+                counts = series.astype(str).value_counts()
+                fields.append({
+                    "name": col,
+                    "kind": "category",
+                    "options": counts.index[:30].tolist(),
+                    "typical": counts.index[0] if len(counts) else None,
+                })
+        return fields
+
     def prepare(self, rows: pd.DataFrame) -> pd.DataFrame:
         """Apply the recipe's sticky notes to other rows (test set, new customers)."""
         return apply_to(rows, self.recipe, self.ctx)
@@ -265,6 +297,7 @@ class DataSession:
             "lock_count": self.lock_count,
             "recipe": self.recipe_view(),
             "data_version": self.data_version,
+            "raw_features": self.raw_features(),
             "completed_steps": self.completed_steps,
             "can_undo": self.can_undo,
             "undo_count": self.undo_count,

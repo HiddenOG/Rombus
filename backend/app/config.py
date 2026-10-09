@@ -13,8 +13,15 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Which AI answers the chat: "gemini" (Google, cloud) or "ollama" (local model)
-    AI_PROVIDER: Literal["gemini", "ollama"] = "gemini"
+    # Which AI answers the chat: "gemini" (Google, cloud), "ollama" (local model), or
+    # "openai_compatible" (any inference server: vLLM, SGLang, LM Studio, Groq, Together, OpenRouter …)
+    AI_PROVIDER: Literal["gemini", "ollama", "openai_compatible"] = "gemini"
+
+    # OpenAI-compatible inference server (only used when AI_PROVIDER=openai_compatible)
+    AI_BASE_URL: str = ""
+    AI_MODEL: str = ""
+    AI_API_KEY: str = ""
+    AI_TIMEOUT_SECONDS: float = 120
 
     # Local models via Ollama
     OLLAMA_URL: str = "http://localhost:11434"
