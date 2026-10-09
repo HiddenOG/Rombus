@@ -51,3 +51,6 @@ Thumbs.db
 
 # Test cache
 .pytest_cache/
+
+# Claude Code local settings
+.claude/settings.local.json
