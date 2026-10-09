@@ -19,7 +19,7 @@ def recipe_tool(name: str, description: str, properties: Optional[Dict[str, Any]
     """Register a tool that adds a step named `name` to the recipe."""
     def run(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         line = session.add_step(name, args)
-        return {"success": True, "message": line.message}
+        return {"success": True, "message": line.message, "step_id": line.id}
 
     run.__name__ = name
     register_tool(name, description, properties, required)(run)

@@ -31,6 +31,8 @@ class ActionResponse(BaseModel):
     evidence: Optional[Dict[str, Any]] = None
     new_state_summary: Optional[Dict[str, Any]] = None
     stage_transition: Optional[str] = None
+    # The recipe line this action created, if it changed data (lets a notebook cell link to it)
+    step: Optional[Dict[str, Any]] = None
 
 
 class SessionInfo(BaseModel):

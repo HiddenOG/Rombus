@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import pandas as pd
 import numpy as np
@@ -55,7 +56,7 @@ class DataSession:
     # result only if every line still runs. A failed change leaves the session untouched.
 
     def _set_recipe(self, lines: List[Line]) -> None:
-        fresh = [Line(l.tool, dict(l.args)) for l in lines]
+        fresh = [Line(l.tool, dict(l.args), id=l.id) for l in lines]
         df = self.raw_train.copy() if self.raw_train is not None else self.df.copy()
         for i, line in enumerate(fresh):
             try:
@@ -96,38 +97,48 @@ class DataSession:
         self._set_recipe(self.recipe[:-1])
         return line
 
-    def update_step(self, index: int, args: Dict[str, Any]) -> Line:
-        """Change one line's settings and replay everything from the top."""
-        self._check_index(index)
+    def update_step(self, step_id: str, args: Dict[str, Any]) -> Line:
+        """Change one line's settings (keeping its id) and replay everything from the top."""
+        index = self.index_of(step_id)
         lines = list(self.recipe)
-        lines[index] = Line(lines[index].tool, dict(args))
+        lines[index] = Line(lines[index].tool, dict(args), id=step_id)
         self._set_recipe(lines)
         return self.recipe[index]
 
-    def delete_step(self, index: int) -> Line:
+    def delete_step(self, step_id: str) -> Line:
         """Remove any line (not just the last) and replay what's left."""
-        self._check_index(index)
+        index = self.index_of(step_id)
         removed = self.recipe[index]
         self._set_recipe(self.recipe[:index] + self.recipe[index + 1:])
         return removed
 
-    def _check_index(self, index: int) -> None:
-        if not 0 <= index < len(self.recipe):
-            raise ValueError(f"There is no step {index + 1}; the recipe has {len(self.recipe)} steps.")
+    def index_of(self, step_id: str) -> int:
+        for i, line in enumerate(self.recipe):
+            if line.id == step_id:
+                return i
+        raise ValueError("That step is no longer in the recipe.")
+
+    def step_view(self, line: Line, index: int) -> Dict[str, Any]:
+        return {
+            "id": line.id,
+            "index": index,
+            "tool": line.tool,
+            "args": line.args,
+            "kind": STEP_TYPES[line.tool].kind,
+            "learned": line.learned,
+            "message": line.message,
+        }
 
     def recipe_view(self) -> List[Dict[str, Any]]:
         """The recipe as plain data for the UI: what each step did and what it learned."""
-        return [
-            {
-                "index": i,
-                "tool": l.tool,
-                "args": l.args,
-                "kind": STEP_TYPES[l.tool].kind,
-                "learned": l.learned,
-                "message": l.message,
-            }
-            for i, l in enumerate(self.recipe)
-        ]
+        return [self.step_view(l, i) for i, l in enumerate(self.recipe)]
+
+    @property
+    def data_version(self) -> str:
+        """Changes whenever the training rows change; lets the UI flag out-of-date charts."""
+        key = json.dumps([self.test_size, self.target_column, [(l.id, l.args) for l in self.recipe]],
+                         sort_keys=True, default=str)
+        return hashlib.sha1(key.encode()).hexdigest()[:10]
 
     def prepare(self, rows: pd.DataFrame) -> pd.DataFrame:
         """Apply the recipe's sticky notes to other rows (test set, new customers)."""
@@ -232,6 +243,7 @@ class DataSession:
             "test_size": self.test_size,
             "lock_count": self.lock_count,
             "recipe": self.recipe_view(),
+            "data_version": self.data_version,
             "completed_steps": self.completed_steps,
             "can_undo": self.can_undo,
             "undo_count": self.undo_count,
@@ -395,7 +407,8 @@ class SessionManager:
                 session.raw_train = pd.read_parquet(train_path)
                 session.test_df = pd.read_parquet(test_path)
                 session.test_size = row["test_size"]
-                lines = [Line(s["tool"], s["args"]) for s in json.loads(row["recipe"] or "[]")]
+                lines = [Line(s["tool"], s["args"], **({"id": s["id"]} if "id" in s else {}))
+                         for s in json.loads(row["recipe"] or "[]")]
                 session._set_recipe(lines)
                 session.models_cleared = False
 
@@ -407,6 +420,21 @@ class SessionManager:
     def save(self, session: DataSession):
         """Explicitly save a session."""
         self._persist_session(session)
+
+    def list_sessions(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Most recently used sessions, for the notebook list."""
+        if not self._db_path:
+            return []
+        with sqlite3.connect(self._db_path) as conn:
+            rows = conn.execute(
+                "SELECT session_id, filename, target_column, current_stage, updated_at "
+                "FROM sessions ORDER BY updated_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [
+            {"session_id": r[0], "filename": r[1], "target": r[2], "stage": r[3], "updated_at": r[4]}
+            for r in rows
+        ]
 
     def cleanup_expired(self):
         """Remove sessions older than TTL."""

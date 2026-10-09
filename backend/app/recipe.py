@@ -14,6 +14,7 @@ Sticky notes are plain, readable values (numbers, lists, dicts), so the notebook
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Type
 
@@ -71,16 +72,25 @@ class Step:
 
 # ── The recipe ──────────────────────────────────────────────────────────────────
 
+def _new_id() -> str:
+    return uuid.uuid4().hex[:10]
+
+
 @dataclass
 class Line:
-    """One recipe line: which step, with which settings, and its sticky note once learned."""
+    """One recipe line: which step, with which settings, and its sticky note once learned.
+
+    `id` stays the same when the line is edited or other lines are deleted, so a notebook
+    cell can always find its step even after positions shift.
+    """
     tool: str
     args: Dict[str, Any]
     learned: Dict[str, Any] = field(default_factory=dict)
     message: str = ""
+    id: str = field(default_factory=_new_id)
 
     def to_json(self) -> Dict[str, Any]:
-        return {"tool": self.tool, "args": self.args}
+        return {"id": self.id, "tool": self.tool, "args": self.args}
 
 
 def run_line(line: Line, df: pd.DataFrame, ctx: Context) -> pd.DataFrame:

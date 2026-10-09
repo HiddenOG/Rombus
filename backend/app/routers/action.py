@@ -50,10 +50,16 @@ async def execute_action(
     # Persist session
     session_manager.save(session)
 
+    step = None
+    if result.get("step_id"):
+        index = session.index_of(result["step_id"])
+        step = session.step_view(session.recipe[index], index)
+
     return ActionResponse(
         success=True,
         message=result["message"],
         evidence=result.get("evidence"),
         new_state_summary=session.get_summary(),
         stage_transition=result.get("stage_transition"),
+        step=step,
     )

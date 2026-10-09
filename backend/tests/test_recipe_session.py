@@ -25,42 +25,51 @@ def session():
 
 class TestEditAnyStep:
     def test_changing_an_early_step_replays_later_ones(self, session):
-        session.add_step("impute_missing", {"column": "age", "strategy": "mean"})
+        first = session.add_step("impute_missing", {"column": "age", "strategy": "mean"})
         session.add_step("scale_all_features", {})
         mean_note = session.recipe[1].learned["scale"]["age"]["mean"]
 
-        session.update_step(0, {"column": "age", "strategy": "median"})
+        session.update_step(first.id, {"column": "age", "strategy": "median"})
 
         assert session.recipe[0].args["strategy"] == "median"
+        assert session.recipe[0].id == first.id  # same step, new settings
         # Step 2 re-learned its sticky note from the new data
         assert session.recipe[1].learned["scale"]["age"]["mean"] != mean_note
 
     def test_delete_a_middle_step(self, session):
-        session.add_step("remove_columns", {"columns": ["city"]})
-        session.add_step("impute_missing", {"column": "age"})
+        first = session.add_step("remove_columns", {"columns": ["city"]})
+        second = session.add_step("impute_missing", {"column": "age"})
         session.add_step("clean_numeric_string", {"column": "income"})
-        session.delete_step(0)
+        session.delete_step(first.id)
         assert [l.tool for l in session.recipe] == ["impute_missing", "clean_numeric_string"]
+        assert session.recipe[0].id == second.id  # ids survive the shift
         assert "city" in session.df.columns
 
     def test_delete_that_breaks_a_later_step_is_refused(self, session):
-        session.add_step("clean_numeric_string", {"column": "income"})
+        first = session.add_step("clean_numeric_string", {"column": "income"})
         session.add_step("log_transform", {"column": "income"})  # needs income to be numeric
         before = session.df.copy()
         with pytest.raises(ValueError, match=r"break a later step: 'log transform'"):
-            session.delete_step(0)
+            session.delete_step(first.id)
         assert len(session.recipe) == 2
         pd.testing.assert_frame_equal(session.df, before)
 
     def test_bad_edit_is_refused(self, session):
-        session.add_step("impute_missing", {"column": "age"})
+        line = session.add_step("impute_missing", {"column": "age"})
         with pytest.raises(ValueError, match="Unknown strategy"):
-            session.update_step(0, {"column": "age", "strategy": "magic"})
+            session.update_step(line.id, {"column": "age", "strategy": "magic"})
         assert session.recipe[0].args == {"column": "age"}
 
     def test_no_such_step(self, session):
-        with pytest.raises(ValueError, match="no step 3"):
-            session.delete_step(2)
+        with pytest.raises(ValueError, match="no longer in the recipe"):
+            session.delete_step("missing-id")
+
+    def test_data_version_changes_with_the_data(self, session):
+        v1 = session.data_version
+        line = session.add_step("impute_missing", {"column": "age"})
+        v2 = session.data_version
+        session.update_step(line.id, {"column": "age", "strategy": "median"})
+        assert len({v1, v2, session.data_version}) == 3
 
 
 class TestModelsClearedOnChange:
@@ -92,6 +101,8 @@ class TestSavedAcrossRestarts:
 
         pd.testing.assert_frame_equal(loaded.df, session.df)
         assert [l.learned for l in loaded.recipe] == [l.learned for l in session.recipe]
+        assert [l.id for l in loaded.recipe] == [l.id for l in session.recipe]
+        assert [s["session_id"] for s in restored.list_sessions()] == [session.session_id]
         assert loaded.undo().tool == "encode_categorical"  # undo works after a restart
         assert loaded.lock_count == 1
 
@@ -111,19 +122,31 @@ class TestRecipeAPI:
             return client.post("/api/action", json={"session_id": sid, "tool": tool, "arguments": args}).json()
 
         act("select_target", column="label")
-        act("impute_missing", column="age", strategy="mean")
+        impute = act("impute_missing", column="age", strategy="mean")
         act("encode_categorical", column="city", method="label")
+        step_id = impute["step"]["id"]
+        assert impute["step"]["kind"] == "learn" and "fill" in impute["step"]["learned"]
 
         recipe = client.get(f"/api/session/{sid}/recipe").json()["recipe"]
         assert [s["tool"] for s in recipe] == ["impute_missing", "encode_categorical"]
-        assert recipe[0]["kind"] == "learn" and "fill" in recipe[0]["learned"]
 
-        edited = client.put(f"/api/session/{sid}/recipe/0", json={"args": {"column": "age", "strategy": "median"}})
+        edited = client.put(f"/api/session/{sid}/recipe/{step_id}", json={"args": {"column": "age", "strategy": "median"}})
         assert edited.status_code == 200
         assert edited.json()["new_state_summary"]["recipe"][0]["args"]["strategy"] == "median"
 
-        bad = client.put(f"/api/session/{sid}/recipe/0", json={"args": {"column": "nope"}})
+        bad = client.put(f"/api/session/{sid}/recipe/{step_id}", json={"args": {"column": "nope"}})
         assert bad.status_code == 400 and "not found" in bad.json()["detail"]
 
-        deleted = client.delete(f"/api/session/{sid}/recipe/0")
+        deleted = client.delete(f"/api/session/{sid}/recipe/{step_id}")
         assert [s["tool"] for s in deleted.json()["new_state_summary"]["recipe"]] == ["encode_categorical"]
+
+        # View actions (charts) create no step
+        assert act("plot_histogram", column="age")["step"] is None
+
+    def test_tools_and_sessions_endpoints(self, client):
+        tools = {t["name"]: t for t in client.get("/api/tools").json()["tools"]}
+        assert tools["impute_missing"]["kind"] == "learn"
+        assert tools["plot_histogram"]["kind"] == "view"
+        assert tools["select_target"]["before_split"]
+        assert "strategy" in tools["impute_missing"]["parameters"]["properties"]
+        assert client.get("/api/sessions").json()["sessions"] == []
