@@ -25,28 +25,6 @@ def parse_test_size(value: Any) -> float:
 
 
 @register_tool(
-    "acquire_iris_data",
-    "Replace the current dataset with the classic Iris dataset from the UCI repository.",
-    before_split=True,
-)
-def acquire_iris_data(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Load the Iris dataset from UCI repository."""
-    url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/iris/iris.data'
-    col_names = ['Sepal_Length', 'Sepal_Width', 'Petal_Length', 'Petal_Width', 'Species']
-    df = pd.read_csv(url, names=col_names)
-    session.df = df
-    session.original_df = df.copy()
-    session.filename = "iris.data"
-    # New dataset: any previous target and lock no longer apply
-    session.target_column = session.problem_type = None
-    session.test_df = session.test_size = None
-    return {
-        "success": True,
-        "message": f"Iris dataset acquired from UCI Repository. Shape: {df.shape[0]} rows × {df.shape[1]} columns.",
-    }
-
-
-@register_tool(
     "select_target",
     "Set the target/label column to predict and lock away a share of rows as the final test set. "
     "Ask the user what percentage to lock away if they haven't said (default 20%).",

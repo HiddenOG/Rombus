@@ -1,30 +1,13 @@
 ASEMIC_WORKFLOW = """
 ASEMIC Workflow (Acquire, Scrub, Explore, Model, Interpret, Communicate):
 
-1. Acquire: Collect raw data from sources like databases, APIs, or CSV files.
-   - Example: Loading Iris dataset from UCI Repository.
-2. Scrub: Clean data by fixing errors, missing values, or outliers.
-   - Example: Encoding categorical species, scaling features.
-3. Explore: Analyze data with visualizations and statistics to find patterns.
-   - Example: Scatter plots of sepal/petal dimensions, correlation heatmaps.
-4. Model: Build machine learning models to predict or classify.
-   - Example: Training an SVM classifier.
-5. Interpret: Understand model results in the context of the problem.
-   - Example: Checking accuracy, precision, recall, F1-score, and SHAP values.
-6. Communicate: Share findings with stakeholders through reports or dashboards.
-   - Example: Building a UI to display predictions, exporting model.
-"""
-
-IRIS_CASE_STUDY = """
-Case Study: Predicting Iris Flower Species
-- Goal: Predict species (Setosa, Versicolor, Virginica) based on sepal/petal measurements.
-- Data: 150 samples, 4 features (Sepal_Length, Sepal_Width, Petal_Length, Petal_Width).
-- Steps:
-  1. Acquire: pd.read_csv('https://archive.ics.uci.edu/ml/machine-learning-databases/iris/iris.data', names=col_names)
-  2. Scrub: LabelEncoder for Species, StandardScaler for features.
-  3. Explore: sns.scatterplot, sns.heatmap.
-  4. Model: SVC(kernel='linear', C=1).
-  5. Evaluate: accuracy_score, classification_report, SHAP explanations.
+1. Acquire: Understand the uploaded dataset and choose the column to predict (the target).
+   Choosing the target locks away a test set that stays untouched until the final evaluation.
+2. Scrub: Clean the training rows: fill or drop missing values, fix types, encode categories, scale numbers.
+3. Explore: Analyze the training rows with charts and statistics to find patterns.
+4. Model: Train and compare machine learning models.
+5. Interpret: Understand what drives the model's predictions and how good it really is.
+6. Communicate: Share findings, predictions and the exported model.
 """
 
 # ASEMIC Stage definitions
