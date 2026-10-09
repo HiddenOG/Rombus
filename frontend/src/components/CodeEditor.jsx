@@ -35,7 +35,7 @@ export function CodeEditor({ initialCode, onSave, onCancel, busy, saveLabel = 'S
                 rows={Math.min(28, Math.max(10, code.split('\n').length + 1))}
                 className="w-full resize-y rounded-xl border border-brand-200 bg-surface p-3.5 font-mono text-[12px] leading-[1.45] text-ink outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-100"
             />
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                 <p className="text-xs text-ink-3">
                     Runs on your machine with full access, like a Jupyter cell. Saving replays every later step.
                 </p>

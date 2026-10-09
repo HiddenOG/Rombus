@@ -23,7 +23,7 @@ const KIND = {
 /** Gutter with the cell number, like Jupyter's [3] */
 function Gutter({ number }) {
     return (
-        <div className="w-10 shrink-0 pt-3 text-right font-mono text-[11px] text-ink-3">
+        <div className="hidden w-10 shrink-0 pt-3 text-right font-mono text-[11px] text-ink-3 sm:block">
             {number != null ? `[${number}]` : ''}
         </div>
     );

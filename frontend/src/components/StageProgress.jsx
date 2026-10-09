@@ -19,7 +19,12 @@ export function StageProgress({ currentStage }) {
     const currentIdx = STAGES.indexOf(currentStage);
 
     return (
-        <ol className="flex items-center gap-1" aria-label="Workflow stages">
+        <>
+        {/* Small screens: one compact pill */}
+        <span className="shrink-0 rounded-full bg-brand-500 px-2.5 py-1 text-xs font-semibold text-white md:hidden">
+            {currentIdx + 1}/{STAGES.length} · {STAGE_LABELS[currentStage] || currentStage}
+        </span>
+        <ol className="hidden items-center gap-1 md:flex" aria-label="Workflow stages">
             {STAGES.map((s, i) => {
                 const isDone = currentIdx > i;
                 const isCurrent = currentIdx === i;
@@ -50,5 +55,6 @@ export function StageProgress({ currentStage }) {
                 );
             })}
         </ol>
+        </>
     );
 }

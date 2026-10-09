@@ -27,7 +27,7 @@ export function PredictForm({ fields, models, onPredict, onCancel, busy }) {
                 Describe a new case. Fields start at a typical training value; clear one to leave it blank
                 (the recipe fills blanks the same way it did for training).
             </p>
-            <div className="grid max-h-72 grid-cols-2 gap-x-3 gap-y-2.5 overflow-y-auto pr-1 custom-scrollbar">
+            <div className="grid max-h-72 grid-cols-1 gap-x-3 gap-y-2.5 overflow-y-auto pr-1 custom-scrollbar sm:grid-cols-2">
                 {fields.map(f => (
                     <label key={f.name} className="block">
                         <span className="mb-1 block truncate text-xs font-semibold text-ink-2" title={f.name}>{f.name}</span>

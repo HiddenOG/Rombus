@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Loader2, ArrowUp, AlertCircle, X, Lock, LineChart, Wand2, Plus, Sparkles, Target } from 'lucide-react';
+import { Loader2, ArrowUp, AlertCircle, X, Lock, LineChart, Wand2, Plus, Sparkles, Target, PanelLeftOpen, Upload } from 'lucide-react';
 import { PredictForm } from './PredictForm';
 import { StageProgress } from './StageProgress';
 import { Logo } from './Logo';
@@ -11,7 +11,7 @@ const humanize = (s) => s.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase()
 /**
  * Notebook — the session as numbered cells, plus the bar for asking and adding steps.
  */
-export function Notebook({ nb }) {
+export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
     const { sessionId, summary, cells, tools, isProcessing } = nb;
     const endRef = useRef(null);
     // Scroll to the newest cell when one is added or an answer arrives
@@ -26,21 +26,31 @@ export function Notebook({ nb }) {
 
     return (
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-line bg-surface/70 px-6 backdrop-blur">
-                <div className="flex items-center gap-2.5 text-sm">
-                    <span className="relative flex h-2.5 w-2.5">
+            <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-line bg-surface/70 px-3 backdrop-blur sm:h-16 sm:px-6">
+                <div className="flex min-w-0 items-center gap-2.5 text-sm">
+                    {!sidebarOpen && (
+                        <button
+                            onClick={onToggleSidebar}
+                            title="Open sidebar"
+                            aria-label="Open sidebar"
+                            className="-ml-1 rounded-lg p-1.5 text-ink-2 hover:bg-surface-2 hover:text-ink"
+                        >
+                            <PanelLeftOpen className="h-5 w-5" />
+                        </button>
+                    )}
+                    <span className="relative flex h-2.5 w-2.5 shrink-0">
                         {isProcessing && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-60" />}
                         <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${isProcessing ? 'bg-brand-500' : 'bg-emerald-500'}`} />
                     </span>
-                    <span className="font-semibold text-ink">{summary?.filename || 'Notebook'}</span>
-                    <span className="text-ink-3">{isProcessing ? 'working…' : 'ready'}</span>
+                    <span className="truncate font-semibold text-ink">{summary?.filename || 'Notebook'}</span>
+                    <span className="hidden text-ink-3 sm:inline">{isProcessing ? 'working…' : 'ready'}</span>
                 </div>
                 <StageProgress currentStage={summary?.stage || 'ACQUIRE'} />
             </header>
 
             <div className="flex-1 overflow-y-auto custom-scrollbar">
-                <div className="mx-auto max-w-3xl space-y-4 py-8 pl-2 pr-6">
-                    {!sessionId && <EmptyState />}
+                <div className="mx-auto max-w-3xl space-y-4 px-3 py-5 sm:py-8 sm:pl-2 sm:pr-6">
+                    {!sessionId && <EmptyState onUpload={nb.upload} isProcessing={isProcessing} />}
                     {cells.map(cell => {
                         if (cell.type === 'note') return <NoteCell key={cell.id} cell={cell} />;
                         if (cell.type === 'ask') {
@@ -93,7 +103,7 @@ function CommandBar({ nb }) {
     };
 
     return (
-        <div className="shrink-0 px-6 pb-5 pt-2">
+        <div className="shrink-0 px-3 pb-3 pt-2 sm:px-6 sm:pb-5">
             <div className="mx-auto max-w-3xl space-y-2.5">
                 {error && (
                     <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800 animate-in">
@@ -106,7 +116,7 @@ function CommandBar({ nb }) {
                 )}
 
                 {predicting && canPredict && (
-                    <div className="rounded-2xl border border-line bg-surface p-3.5 shadow-[0_2px_12px_rgba(28,25,23,0.06)] animate-in">
+                    <div className="max-h-[60dvh] overflow-y-auto rounded-2xl border border-line bg-surface p-3.5 shadow-[0_2px_12px_rgba(28,25,23,0.06)] animate-in custom-scrollbar">
                         <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
                             <Target className="h-4 w-4 text-brand-600" /> Predict a new case
                         </p>
@@ -124,7 +134,7 @@ function CommandBar({ nb }) {
                 )}
 
                 {adding && (
-                    <div className="rounded-2xl border border-line bg-surface p-3.5 shadow-[0_2px_12px_rgba(28,25,23,0.06)] animate-in">
+                    <div className="max-h-[60dvh] overflow-y-auto rounded-2xl border border-line bg-surface p-3.5 shadow-[0_2px_12px_rgba(28,25,23,0.06)] animate-in custom-scrollbar">
                         <div className="mb-3 flex items-center gap-2">
                             <select
                                 value={toolName}
@@ -171,7 +181,7 @@ function CommandBar({ nb }) {
                         onChange={e => setText(e.target.value)}
                         placeholder={sessionId ? 'Ask the copilot about your data…' : 'Upload a dataset to start'}
                         disabled={!sessionId || isProcessing}
-                        className="flex-1 bg-transparent py-2 text-[15px] text-ink outline-none placeholder:text-ink-3 disabled:cursor-not-allowed"
+                        className="min-w-0 flex-1 bg-transparent py-2 text-base text-ink outline-none placeholder:text-ink-3 disabled:cursor-not-allowed sm:text-[15px]"
                     />
                     <button
                         type="submit"
@@ -184,7 +194,7 @@ function CommandBar({ nb }) {
                 </form>
 
                 <div className="flex items-center justify-between gap-3">
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                         <QuickButton onClick={() => nb.ask('What should I do next?')} disabled={!sessionId || isProcessing}>
                             <Sparkles className="h-3.5 w-3.5" /> Suggest next step
                         </QuickButton>
@@ -197,7 +207,7 @@ function CommandBar({ nb }) {
                             </QuickButton>
                         )}
                     </div>
-                    <p className="text-xs text-ink-3">Nothing changes until you press Run.</p>
+                    <p className="hidden text-xs text-ink-3 md:block">Nothing changes until you press Run.</p>
                 </div>
             </div>
         </div>
@@ -216,7 +226,7 @@ function QuickButton({ children, ...props }) {
     );
 }
 
-function EmptyState() {
+function EmptyState({ onUpload, isProcessing }) {
     const points = [
         { icon: Lock, title: 'Honest scores', text: 'A test set is locked away before you see any statistics.' },
         { icon: Wand2, title: 'You stay in control', text: 'Every step is a cell you can edit, copy or delete.' },
@@ -224,13 +234,27 @@ function EmptyState() {
     ];
 
     return (
-        <div className="pl-8 pt-12 text-center">
-            <Logo size={72} className="mx-auto mb-6 drop-shadow-md" />
-            <h2 className="text-3xl font-bold tracking-tight text-ink">Your data science notebook</h2>
+        <div className="pt-6 text-center sm:pl-8 sm:pt-12">
+            <Logo size={64} className="mx-auto mb-5 drop-shadow-md sm:mb-6" />
+            <h2 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">Your data science notebook</h2>
             <p className="mx-auto mt-3 max-w-md text-[15px] leading-relaxed text-ink-2">
                 Upload a spreadsheet and build a prediction model step by step. Ask the copilot, or add steps yourself.
             </p>
-            <div className="mt-10 grid gap-3 text-left sm:grid-cols-3">
+            <label
+                className={`mt-6 inline-flex items-center gap-2 rounded-xl bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand-200 ${
+                    isProcessing ? 'cursor-wait opacity-70' : 'cursor-pointer hover:bg-brand-600'
+                }`}
+            >
+                <Upload className="h-4 w-4" /> {isProcessing ? 'Uploading…' : 'Upload a CSV or Excel file'}
+                <input
+                    type="file"
+                    className="hidden"
+                    accept=".csv,.xlsx,.xls"
+                    disabled={isProcessing}
+                    onChange={e => e.target.files[0] && onUpload(e.target.files[0])}
+                />
+            </label>
+            <div className="mt-8 grid gap-3 text-left sm:mt-10 sm:grid-cols-3">
                 {points.map(({ icon: Icon, title, text }) => (
                     <div key={title} className="rounded-2xl border border-line bg-surface p-4">
                         <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50">

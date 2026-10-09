@@ -1,20 +1,32 @@
-import React from 'react';
-import { Upload, FileSpreadsheet, Layers, Sparkles, Undo2, Lock, Target, Boxes, NotebookPen, Plus, Trash2 } from 'lucide-react';
+import React, { useCallback, useState } from 'react';
+import { Upload, FileSpreadsheet, Layers, Sparkles, Undo2, Lock, Target, Boxes, NotebookPen, Plus, Trash2, PanelLeftClose } from 'lucide-react';
 import { Logo } from './Logo';
+import { ConfirmDialog } from './ConfirmDialog';
 
 /**
  * Sidebar — brand, dataset overview and column evidence panel.
  */
-export function Sidebar({ sessionId, summary, onFileUpload, isProcessing, notebooks = [], onOpenNotebook, onNewNotebook, onDeleteNotebook }) {
+export function Sidebar({ open, onClose, sessionId, summary, onFileUpload, isProcessing, notebooks = [], onOpenNotebook, onNewNotebook, onDeleteNotebook }) {
     return (
-        <aside className="w-80 shrink-0 bg-surface border-r border-line flex flex-col overflow-hidden">
+        <>
+            {/* Phones/tablets: the sidebar is a drawer over the page, with a dimmed backdrop */}
+            {open && <div className="fixed inset-0 z-30 bg-ink/30 lg:hidden" onClick={onClose} aria-hidden="true" />}
+            <aside
+                aria-label="Notebooks and dataset"
+                className={`fixed inset-y-0 left-0 z-40 flex w-[85vw] max-w-80 shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-transform duration-200 lg:static lg:z-auto lg:w-80 ${
+                    open ? 'translate-x-0' : '-translate-x-full lg:hidden'
+                }`}
+            >
             {/* Brand */}
             <div className="shrink-0 h-16 px-5 flex items-center gap-3 border-b border-line">
                 <Logo size={36} className="drop-shadow-sm" />
-                <div className="leading-tight">
+                <div className="min-w-0 flex-1 leading-tight">
                     <h1 className="text-[15px] font-bold text-ink">AutoML Copilot</h1>
                     <p className="text-xs text-ink-3">Data science you can trust</p>
                 </div>
+                <button onClick={onClose} title="Close sidebar" aria-label="Close sidebar" className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-ink">
+                    <PanelLeftClose className="h-4.5 w-4.5" />
+                </button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar">
@@ -35,7 +47,8 @@ export function Sidebar({ sessionId, summary, onFileUpload, isProcessing, notebo
                     </>
                 )}
             </div>
-        </aside>
+            </aside>
+        </>
     );
 }
 
@@ -48,11 +61,9 @@ function timeAgo(seconds) {
 }
 
 function NotebookList({ notebooks, currentId, onOpen, onNew, onDelete, disabled }) {
-    const confirmDelete = (n) => {
-        if (window.confirm(`Delete the notebook "${n.filename}"? Its data, recipe and cells will be removed for good.`)) {
-            onDelete(n.session_id);
-        }
-    };
+    const [pending, setPending] = useState(null); // the notebook waiting for "are you sure?"
+    const confirmDelete = (n) => setPending(n);
+    const cancel = useCallback(() => setPending(null), []);
 
     return (
         <section>
@@ -89,7 +100,7 @@ function NotebookList({ notebooks, currentId, onOpen, onNew, onDelete, disabled 
                                 disabled={disabled}
                                 title="Delete notebook"
                                 aria-label={`Delete notebook ${n.filename}`}
-                                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-3 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-700 focus:opacity-100 group-hover:opacity-100"
+                                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-3 transition-opacity hover:bg-red-50 hover:text-red-700 focus:opacity-100 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100"
                             >
                                 <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -97,6 +108,25 @@ function NotebookList({ notebooks, currentId, onOpen, onNew, onDelete, disabled 
                     ))}
                 </ul>
             )}
+
+            <ConfirmDialog
+                open={Boolean(pending)}
+                title="Delete this notebook?"
+                confirmLabel="Delete notebook"
+                busy={disabled}
+                onCancel={cancel}
+                onConfirm={() => {
+                    onDelete(pending.session_id);
+                    setPending(null);
+                }}
+            >
+                <p>
+                    <strong className="text-ink">{pending?.filename}</strong>
+                    {pending?.target ? <> (predicting <span className="font-mono">{pending.target}</span>)</> : null} will be removed
+                    for good: the uploaded data, the locked test rows, the recipe and every cell.
+                </p>
+                <p className="mt-2 font-medium text-red-700">This can't be undone.</p>
+            </ConfirmDialog>
         </section>
     );
 }
