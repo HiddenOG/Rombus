@@ -59,6 +59,33 @@ def test_full_modeling_flow(client):
     assert trained["evidence"]["best_model"] in ("rf", "lr")
 
 
+def test_predict_for_new_customer_after_cleaning(client):
+    # Lesson 1's crash, end to end: preprocess, train, then predict from raw values
+    sid = _upload(client)
+    for tool, args in [
+        ("select_target", {"column": "label"}),
+        ("impute_all_missing", {}),
+        ("encode_categorical", {"column": "color", "method": "onehot"}),
+        ("scale_all_features", {}),
+        ("train_test_split", {}),
+        ("train_models", {"algorithms": ["lr"]}),
+    ]:
+        assert _action(client, sid, tool, **args)["success"], tool
+
+    result = _action(client, sid, "predict", features={"size": 12, "color": "red", "price": 18.0})
+    assert result["success"], result["message"]
+    assert result["evidence"]["prediction"] in ("yes", "no")
+
+
+def test_undo_through_api(client):
+    sid = _upload(client)
+    _action(client, sid, "select_target", column="label")
+    _action(client, sid, "remove_columns", columns=["color"])
+    undone = _action(client, sid, "undo")
+    assert undone["success"]
+    assert "color" in [c["name"] for c in undone["new_state_summary"]["columns"]]
+
+
 def test_chat_returns_suggestions(client):
     sid = _upload(client)
     resp = client.post("/api/chat", json={"session_id": sid, "message": "what now?"})

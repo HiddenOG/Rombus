@@ -7,6 +7,7 @@ import sqlite3
 import time
 from typing import Dict, Optional, Any, List
 from app.config import settings
+from app.recipe import Context, Line, apply_to, replay, run_line
 
 
 class DataSession:
@@ -28,38 +29,51 @@ class DataSession:
         self.y_train = None
         self.y_test = None
         self.trained_models: Dict[str, Any] = {}
-        self.scaler = None
-        self.label_encoders: Dict[str, Any] = {}
         # Final exam: rows locked away when the target is chosen, untouched until evaluation
         self.test_df: Optional[pd.DataFrame] = None
         self.test_size: Optional[float] = None
+        # The recipe: training rows as they were at the lock, plus every change since.
+        # self.df is always replay(raw_train, recipe).
+        self.raw_train: Optional[pd.DataFrame] = None
+        self.recipe: List[Line] = []
         self.created_at = time.time()
         self.updated_at = time.time()
-        # Undo/rollback: snapshot stack of DataFrame states
-        self._snapshots: List[pd.DataFrame] = []
-        self._max_snapshots = 20
 
-    def save_snapshot(self):
-        """Save current DataFrame state for undo."""
-        self._snapshots.append(self.df.copy())
-        if len(self._snapshots) > self._max_snapshots:
-            self._snapshots.pop(0)
+    @property
+    def ctx(self) -> Context:
+        return Context(target=self.target_column)
 
-    def undo(self) -> bool:
-        """Revert to the previous DataFrame state."""
-        if not self._snapshots:
-            return False
-        self.df = self._snapshots.pop()
+    def add_step(self, tool: str, args: Dict[str, Any]) -> Line:
+        """Run a data-changing step on the training rows and write it into the recipe.
+
+        Raises ValueError (with a user-facing message) if the step can't run; nothing changes then.
+        """
+        line = Line(tool, dict(args))
+        self.df = run_line(line, self.df, self.ctx)
+        self.recipe.append(line)
         self.updated_at = time.time()
-        return True
+        return line
+
+    def undo(self) -> Optional[Line]:
+        """Cross out the last recipe line and rebuild the training rows from scratch."""
+        if not self.recipe:
+            return None
+        line = self.recipe.pop()
+        self.df = replay(self.raw_train, self.recipe, self.ctx)
+        self.updated_at = time.time()
+        return line
+
+    def prepare(self, rows: pd.DataFrame) -> pd.DataFrame:
+        """Apply the recipe's sticky notes to other rows (test set, new customers)."""
+        return apply_to(rows, self.recipe, self.ctx)
 
     @property
     def can_undo(self) -> bool:
-        return len(self._snapshots) > 0
+        return len(self.recipe) > 0
 
     @property
     def undo_count(self) -> int:
-        return len(self._snapshots)
+        return len(self.recipe)
 
     @property
     def is_split(self) -> bool:
@@ -86,9 +100,11 @@ class DataSession:
                 stratify = y
 
         train, test = train_test_split(full, test_size=test_size, random_state=42, stratify=stratify)
-        self.df = train.reset_index(drop=True)
+        self.raw_train = train.reset_index(drop=True)
+        self.df = self.raw_train.copy()
         self.test_df = test.reset_index(drop=True)
         self.test_size = test_size
+        self.recipe = []
         return dropped
 
     def compute_column_evidence(self, col: str) -> Dict[str, Any]:

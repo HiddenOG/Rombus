@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import pickle
 import os
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
 from sklearn.ensemble import (
@@ -83,6 +83,30 @@ ALGORITHM = {
 }
 
 
+def model_features(df: pd.DataFrame, target: str) -> pd.DataFrame:
+    """Turn cleaned rows into the all-numeric table a model needs.
+
+    Used at training AND prediction time so both always build features the same way.
+    Leftover text columns are one-hot encoded (keeping every category, so a single new row
+    still gets its own column) and remaining blanks become 0.
+    """
+    X = df.drop(columns=[target], errors="ignore")
+    text_cols = categorical_columns(X)
+    if text_cols:
+        X = pd.get_dummies(X, columns=text_cols, dtype=int)
+    return X.fillna(0)
+
+
+def target_classes(session: DataSession) -> Optional[List[str]]:
+    """If the target was label-encoded in the recipe, the classes needed to decode predictions."""
+    for line in reversed(session.recipe):
+        if line.tool in ("encode_categorical", "encode_all_categorical") and line.args.get("method", "label") == "label":
+            classes = line.learned.get("classes", {}).get(session.target_column)
+            if classes:
+                return classes
+    return None
+
+
 @register_tool(
     "train_test_split",
     "Practice split: divide the training rows into a part to learn from and a part to check against. "
@@ -102,16 +126,9 @@ def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str,
     test_size = args.get("test_size", 0.2)
     stratify = args.get("stratify", False)
 
-    X = session.df.drop(columns=[session.target_column])
+    X = model_features(session.df, session.target_column)
     y = session.df[session.target_column]
-
-    # Handle non-numeric columns: warn and auto-encode
-    object_cols = categorical_columns(X)
-    if object_cols:
-        X = pd.get_dummies(X, columns=object_cols, drop_first=True)
-
-    # Fill remaining NaN
-    X = X.fillna(0)
+    object_cols = categorical_columns(session.df.drop(columns=[session.target_column]))
 
     stratify_param = y if stratify and session.problem_type == "classification" else None
 
@@ -269,28 +286,26 @@ def predict(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     if not features:
         return {"success": False, "message": "Provide 'features' dict with column values."}
 
-    input_data = pd.DataFrame([features])
+    # The new row goes through the same recipe (with the training sticky notes) as the training rows,
+    # then gets the exact columns the model was trained on.
+    raw_columns = [c for c in (session.raw_train if session.raw_train is not None else session.df).columns
+                   if c != session.target_column]
+    missing = [c for c in raw_columns if c not in features]
+    prepared = session.prepare(pd.DataFrame([features]))
+    X = model_features(prepared, session.target_column).reindex(columns=session.X_train.columns, fill_value=0)
 
-    # Apply scaling if exists
-    if session.scaler:
-        try:
-            cols = input_data.columns.tolist()
-            input_data[cols] = session.scaler.transform(input_data[cols])
-        except Exception:
-            pass  # If columns don't match scaler, predict without scaling
+    prediction = model.predict(X)[0]
+    classes = target_classes(session)
+    if classes is not None and 0 <= int(prediction) < len(classes):
+        prediction = classes[int(prediction)]
+    prediction = prediction.item() if hasattr(prediction, "item") else prediction
 
-    prediction = model.predict(input_data)[0]
-
-    # Decode if target was label-encoded
-    if session.target_column in session.label_encoders:
-        try:
-            prediction = session.label_encoders[session.target_column].inverse_transform([int(prediction)])[0]
-        except Exception:
-            pass
-
+    msg = f"Prediction: {prediction} (using {model_name})."
+    if missing:
+        msg += f" Not provided, so treated as blank: {', '.join(missing)}."
     return {
         "success": True,
-        "message": f"Prediction: {prediction} (using {model_name}).",
+        "message": msg,
         "evidence": {"prediction": str(prediction), "model_used": model_name, "input_features": features},
     }
 
@@ -380,8 +395,8 @@ def save_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     with open(path, 'wb') as f:
         pickle.dump({
             'model': session.trained_models[model_name],
-            'scaler': session.scaler,
-            'encoders': session.label_encoders,
+            # The recipe with its sticky notes: replay with app.recipe.apply_to before predicting
+            'recipe': [{"tool": l.tool, "args": l.args, "learned": l.learned} for l in session.recipe],
             'target': session.target_column,
             'problem_type': session.problem_type,
             'feature_names': session.X_train.columns.tolist() if session.X_train is not None else [],

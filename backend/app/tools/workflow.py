@@ -32,20 +32,11 @@ def transition_stage(session: DataSession, args: Dict[str, Any]) -> Dict[str, An
 @register_tool("undo", "Revert the last data transformation.")
 def undo(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Undo the last data transformation."""
-    if not session.can_undo:
-        return {"success": False, "message": "Nothing to undo. No previous snapshots available."}
-
-    success = session.undo()
-    if success:
-        # Remove the last completed step
-        if session.completed_steps:
-            removed_step = session.completed_steps.pop()
-        else:
-            removed_step = "unknown"
-
-        return {
-            "success": True,
-            "message": f"Undone last action ({removed_step}). DataFrame reverted. {session.undo_count} undo(s) remaining.",
-        }
-    else:
-        return {"success": False, "message": "Failed to undo."}
+    line = session.undo()
+    if line is None:
+        return {"success": False, "message": "Nothing to undo: the recipe has no steps yet."}
+    return {
+        "success": True,
+        "message": f"Undid '{line.tool.replace('_', ' ')}' and rebuilt the training rows from the remaining "
+                   f"{session.undo_count} recipe step{'s' if session.undo_count != 1 else ''}.",
+    }

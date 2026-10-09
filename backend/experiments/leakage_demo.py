@@ -1,4 +1,4 @@
-"""Lesson 1 — how much does data leakage actually matter?
+﻿"""Lesson 1 â€” how much does data leakage actually matter?
 
 Run from backend/:  python -m experiments.leakage_demo
 
@@ -64,7 +64,7 @@ def part_b():
 
 
 def part_c():
-    print("C. The predict bug in our app")
+    print("C. The predict bug in our app (fixed by the recipe engine; this used to crash)")
     from app.session import DataSession
     from app.tools import execute_tool
 

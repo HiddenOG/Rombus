@@ -59,69 +59,81 @@ class TestAcquireTools:
         assert "describe" in result["evidence"]
 
 
+def call(tool, session, args):
+    """Call a tool directly (bypassing the lock gate, which test_split.py covers)."""
+    from app.tools import TOOL_REGISTRY
+    return TOOL_REGISTRY[tool](session, args)
+
+
 class TestScrubTools:
     def test_remove_columns(self, sample_session):
-        from app.tools.scrub import remove_columns
-        result = remove_columns(sample_session, {"columns": ["Sepal_Width"]})
+        result = call("remove_columns", sample_session, {"columns": ["Sepal_Width"]})
         assert result["success"]
         assert "Sepal_Width" not in sample_session.df.columns
 
     def test_check_duplicates(self, sample_session):
-        from app.tools.scrub import check_duplicates
-        result = check_duplicates(sample_session, {})
+        result = call("check_duplicates", sample_session, {})
         assert result["success"]
         assert "duplicate_count" in result["evidence"]
 
+    def test_check_duplicates_is_not_a_recipe_step(self, sample_session):
+        call("check_duplicates", sample_session, {})
+        assert sample_session.recipe == []
+
     def test_impute_missing_mean(self, session_with_missing):
-        from app.tools.scrub import impute_missing
-        result = impute_missing(session_with_missing, {"column": "A", "strategy": "mean"})
+        result = call("impute_missing", session_with_missing, {"column": "A", "strategy": "mean"})
         assert result["success"]
         assert session_with_missing.df["A"].isnull().sum() == 0
 
     def test_impute_missing_mode(self, session_with_missing):
-        from app.tools.scrub import impute_missing
-        result = impute_missing(session_with_missing, {"column": "B", "strategy": "mode"})
+        result = call("impute_missing", session_with_missing, {"column": "B", "strategy": "mode"})
         assert result["success"]
         assert session_with_missing.df["B"].isnull().sum() == 0
 
     def test_impute_missing_invalid_strategy(self, session_with_missing):
-        from app.tools.scrub import impute_missing
-        result = impute_missing(session_with_missing, {"column": "A", "strategy": "mean_on_text"})
-        assert not result["success"]
+        with pytest.raises(ValueError, match="Unknown strategy"):
+            call("impute_missing", session_with_missing, {"column": "A", "strategy": "mean_on_text"})
+        assert session_with_missing.recipe == []  # a failed step leaves no trace
 
     def test_encode_categorical_label(self, sample_session):
-        from app.tools.scrub import encode_categorical
-        result = encode_categorical(sample_session, {"column": "Species", "method": "label"})
+        result = call("encode_categorical", sample_session, {"column": "Species", "method": "label"})
         assert result["success"]
         assert pd.api.types.is_integer_dtype(sample_session.df["Species"])
 
     def test_encode_categorical_onehot(self, sample_session):
-        from app.tools.scrub import encode_categorical
-        result = encode_categorical(sample_session, {"column": "Species", "method": "onehot"})
+        result = call("encode_categorical", sample_session, {"column": "Species", "method": "onehot"})
         assert result["success"]
         assert "Species" not in sample_session.df.columns
 
     def test_scale_features(self, sample_session):
-        from app.tools.scrub import scale_features
         sample_session.target_column = "Species"
-        result = scale_features(sample_session, {})
+        result = call("scale_features", sample_session, {})
         assert result["success"]
-        # Check values are scaled (mean ~0)
         assert abs(sample_session.df["Sepal_Length"].mean()) < 0.1
 
     def test_undo_after_remove(self, sample_session):
-        from app.tools.scrub import remove_columns
+        from app.tools.acquire import select_target
+        select_target(sample_session, {"column": "Species"})
         original_cols = list(sample_session.df.columns)
-        remove_columns(sample_session, {"columns": ["Sepal_Width"]})
+        call("remove_columns", sample_session, {"columns": ["Sepal_Width"]})
         assert "Sepal_Width" not in sample_session.df.columns
 
-        assert sample_session.undo()
+        assert sample_session.undo().tool == "remove_columns"
         assert list(sample_session.df.columns) == original_cols
 
+    def test_undo_removes_the_right_step_after_a_chart(self, sample_session):
+        # The old bug: charts were logged as steps, so undo named the wrong one
+        from app.tools.acquire import select_target
+        select_target(sample_session, {"column": "Species"})
+        call("impute_all_missing", sample_session, {})
+        call("plot_histogram", sample_session, {"column": "Sepal_Length"})
+        result = call("undo", sample_session, {})
+        assert "impute all missing" in result["message"]
+        assert sample_session.recipe == []
+
     def test_column_validation(self, sample_session):
-        from app.tools.scrub import impute_missing
         with pytest.raises(ValueError, match="not found"):
-            impute_missing(sample_session, {"column": "FakeColumn", "strategy": "mean"})
+            call("impute_missing", sample_session, {"column": "FakeColumn", "strategy": "mean"})
 
 
 class TestExploreTools:
@@ -219,16 +231,21 @@ class TestSessionManagement:
         assert session.filename == "test.csv"
         assert session.current_stage == "ACQUIRE"
 
-    def test_snapshot_and_undo(self):
-        df = pd.DataFrame({"a": [1, 2, 3]})
+    def test_recipe_and_undo_replay(self):
+        df = pd.DataFrame({"a": [1.0, None, 3.0, 4.0, 5.0], "y": [0, 1, 0, 1, 0]})
         session = DataSession(df, "test.csv")
+        session.target_column, session.problem_type = "y", "regression"
+        session.lock_test_rows(0.2)
+        before = session.df.copy()
 
-        session.save_snapshot()
-        session.df["a"] = [10, 20, 30]
-        assert session.df["a"].tolist() == [10, 20, 30]
+        session.add_step("impute_missing", {"column": "a"})
+        session.add_step("scale_all_features", {})
+        assert session.undo_count == 2
 
         session.undo()
-        assert session.df["a"].tolist() == [1, 2, 3]
+        session.undo()
+        pd.testing.assert_frame_equal(session.df, before)
+        assert session.undo() is None
 
     def test_summary_includes_all_columns(self):
         df = pd.DataFrame({f"col_{i}": range(10) for i in range(15)})
