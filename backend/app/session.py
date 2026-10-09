@@ -11,6 +11,7 @@ from typing import Dict, Optional, Any, List
 from app.config import settings
 from app.recipe import STEP_TYPES, Context, Line, apply_to, run_line
 from app.recipe_code import step_code
+from app.code_checks import peeking_warnings
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,14 @@ class DataSession:
         self._set_recipe(lines)
         return self.recipe[index]
 
+    def replace_step(self, step_id: str, tool: str, args: Dict[str, Any]) -> Line:
+        """Swap a line for a different kind of step in the same place (e.g. built-in -> custom code)."""
+        index = self.index_of(step_id)
+        lines = list(self.recipe)
+        lines[index] = Line(tool, dict(args), id=step_id)
+        self._set_recipe(lines)
+        return self.recipe[index]
+
     def delete_step(self, step_id: str) -> Line:
         """Remove any line (not just the last) and replay what's left."""
         index = self.index_of(step_id)
@@ -129,6 +138,9 @@ class DataSession:
             "learned": line.learned,
             "message": line.message,
             "code": step_code(line, self.target_column),
+            "editable_code": step_code(line, self.target_column, with_learned=False),
+            "warnings": peeking_warnings(line.args.get("code", "")) if line.tool == "custom_code" else [],
+            "based_on": line.args.get("based_on"),
         }
 
     def recipe_view(self) -> List[Dict[str, Any]]:

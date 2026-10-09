@@ -10,7 +10,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from app.session import DataSession
-from app.tools import TOOL_REGISTRY, TOOL_SPECS, available_tools
+from app.tools import HIDDEN_FROM_AI, TOOL_REGISTRY, TOOL_SPECS, available_tools
 from app.workflow_context import ASEMIC_WORKFLOW
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,7 @@ INSTRUCTIONS:
 def tool_specs_for(session: Optional[DataSession] = None) -> List[Dict[str, Any]]:
     """Tool schemas (each with a required 'explanation'); only the tools usable right now if a session is given."""
     names = available_tools(session) if session else list(TOOL_SPECS)
+    names = [n for n in names if n not in HIDDEN_FROM_AI]
     specs = []
     for spec in (TOOL_SPECS[n] for n in names):
         params = copy.deepcopy(spec["parameters"])

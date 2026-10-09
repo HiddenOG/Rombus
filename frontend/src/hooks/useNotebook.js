@@ -178,6 +178,23 @@ export function useNotebook() {
         return true;
     });
 
+    // Saving code turns a built-in step into a custom code step (same place in the recipe)
+    const editCode = (cell, code) => busy(async () => {
+        const data = await api.updateStepCode(sessionId, cell.stepId, code);
+        setSummary(data.new_state_summary);
+        patchCell(cell.id, { tool: 'custom_code' });
+        addCell({ type: 'note', text: data.message });
+        return true;
+    });
+
+    const revertCell = (cell) => busy(async () => {
+        const data = await api.revertStep(sessionId, cell.stepId);
+        setSummary(data.new_state_summary);
+        const step = data.new_state_summary.recipe.find(s => s.id === cell.stepId);
+        patchCell(cell.id, { tool: step?.tool ?? cell.tool, args: step?.args ?? cell.args });
+        addCell({ type: 'note', text: data.message });
+    });
+
     const deleteCell = (cell) => busy(async () => {
         const inRecipe = cell.stepId && summary?.recipe?.some(s => s.id === cell.stepId);
         if (inRecipe) {
@@ -204,6 +221,8 @@ export function useNotebook() {
         run,
         rerun,
         editStep,
+        editCode,
+        revertCell,
         deleteCell,
         copyCell,
         openNotebook,

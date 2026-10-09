@@ -79,6 +79,17 @@ export async function updateStep(sessionId, stepId, args) {
     });
 }
 
+export async function updateStepCode(sessionId, stepId, code) {
+    return apiRequest(`/api/session/${sessionId}/recipe/${stepId}/code`, {
+        method: 'PUT',
+        body: JSON.stringify({ code }),
+    });
+}
+
+export async function revertStep(sessionId, stepId) {
+    return apiRequest(`/api/session/${sessionId}/recipe/${stepId}/revert`, { method: 'POST' });
+}
+
 export async function deleteStep(sessionId, stepId) {
     return apiRequest(`/api/session/${sessionId}/recipe/${stepId}`, { method: 'DELETE' });
 }

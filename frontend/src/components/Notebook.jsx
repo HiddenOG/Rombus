@@ -55,6 +55,8 @@ export function Notebook({ nb }) {
                                 summary={summary}
                                 isProcessing={isProcessing}
                                 onEdit={nb.editStep}
+                                onEditCode={nb.editCode}
+                                onRevert={nb.revertCell}
                                 onCopy={nb.copyCell}
                                 onDelete={nb.deleteCell}
                                 onRerun={nb.rerun}

@@ -197,12 +197,22 @@ def _scale_all(args, target):
     return _scale({}, target)
 
 
-def step_code(line: Line, target: Optional[str]) -> str:
+@builder("custom_code")
+def _custom(args, target):
+    return args.get("code", "")
+
+
+def step_code(line: Line, target: Optional[str], with_learned: bool = True) -> str:
     """The step as Python, followed by what it actually learned from this session's training rows."""
     build = BUILDERS.get(line.tool)
     if build is None:
         return f"# No code view for {line.tool}"
-    code = "import numpy as np\nimport pandas as pd\n\n\n" + build(line.args, target)
+    if line.tool == "custom_code":
+        code = build(line.args, target).rstrip()
+    else:
+        code = "import numpy as np\nimport pandas as pd\n\n\n" + build(line.args, target)
+    if not with_learned:
+        return code
     if line.learned:
         learned = json.dumps(line.learned, indent=2, default=str)
         code += "\n\n\n# What learn() returned for these training rows:\n" + "\n".join(f"# {l}" for l in learned.splitlines())

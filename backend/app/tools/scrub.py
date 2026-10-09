@@ -7,7 +7,7 @@ replayable on the locked test rows and on new customers.
 
 from typing import Any, Dict, List, Optional
 
-from app.recipe import STEP_TYPES
+from app.recipe import CUSTOM_TEMPLATE, STEP_TYPES
 from app.session import DataSession
 from app.tools import COLUMN, COLUMNS, register_tool
 
@@ -16,14 +16,14 @@ ENCODING = {"type": "string", "enum": ["label", "onehot"]}
 
 
 def recipe_tool(name: str, description: str, properties: Optional[Dict[str, Any]] = None,
-                required: Optional[List[str]] = None) -> None:
+                required: Optional[List[str]] = None, ai: bool = True) -> None:
     """Register a tool that adds a step named `name` to the recipe."""
     def run(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         line = session.add_step(name, args)
         return {"success": True, "message": line.message, "step_id": line.id}
 
     run.__name__ = name
-    register_tool(name, description, properties, required, kind=STEP_TYPES[name].kind)(run)
+    register_tool(name, description, properties, required, kind=STEP_TYPES[name].kind, ai=ai)(run)
 
 
 recipe_tool("remove_columns", "Drop one or more columns.", {"columns": COLUMNS}, ["columns"])
@@ -75,6 +75,16 @@ recipe_tool(
 recipe_tool("scale_all_features", "Standard-scale ALL numeric features at once (skips the target).")
 
 recipe_tool("log_transform", "Apply log1p to a skewed numeric column.", {"column": COLUMN}, ["column"])
+
+# People only: the AI is never offered this (running AI-written code needs a sandbox first)
+recipe_tool(
+    "custom_code",
+    "Your own Python step: learn(train) reads the training rows, apply(df, learned) changes any rows.",
+    {"code": {"type": "string", "format": "code", "description": "Python defining learn(train) and apply(df, learned).",
+              "default": CUSTOM_TEMPLATE}},
+    ["code"],
+    ai=False,
+)
 
 
 @register_tool("check_duplicates", "Count duplicate rows.")

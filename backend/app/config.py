@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # Tried in order when the main model is busy (comma-separated)
     GEMINI_FALLBACK_MODELS: str = "gemini-2.5-flash-lite"
 
+    # Run user-written Python in custom code steps. It runs with full access to this machine,
+    # like a Jupyter cell: fine on your own laptop, but MUST be false on any shared/public server.
+    ALLOW_CUSTOM_CODE: bool = True
+
     # API Authentication (optional — empty string disables auth)
     API_SECRET_KEY: str = ""
 

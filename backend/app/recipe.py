@@ -58,6 +58,11 @@ class Step:
     def summary(self, before: pd.DataFrame, after: pd.DataFrame, learned: Dict[str, Any]) -> str:
         return f"Applied {self.name}."
 
+    @property
+    def train_only(self) -> bool:
+        """Skip this step for test rows and new customers?"""
+        return self.kind == "train_only"
+
     # helpers
     def _require_column(self, df: pd.DataFrame, col: Optional[str], arg: str = "column") -> str:
         if not col:
@@ -115,7 +120,7 @@ def apply_to(df: pd.DataFrame, lines: List[Line], ctx: Context) -> pd.DataFrame:
     df = df.copy()
     for line in lines:
         step = STEP_TYPES[line.tool](line.args, ctx)
-        if step.kind == "train_only":
+        if step.train_only:
             continue
         df = step.apply(df, line.learned)
     return df
@@ -399,6 +404,113 @@ class ScaleAllFeatures(ScaleFeatures):
         if not cols:
             raise ValueError("No numeric columns available to scale.")
         return cols
+
+
+# ── Custom code ─────────────────────────────────────────────────────────────────
+
+CUSTOM_TEMPLATE = '''import numpy as np
+import pandas as pd
+
+TRAIN_ONLY = False  # True = only change the training rows (e.g. when dropping rows)
+
+
+def learn(train):
+    # Look at the TRAINING rows and return what apply() needs to remember
+    return {}
+
+
+def apply(df, learned):
+    # Change the rows using only `learned`: this also runs on test rows and new customers
+    return df
+'''
+
+CODE_FILENAME = "<your code>"
+
+
+def _plain(value: Any) -> Any:
+    """Make learned values plain (JSON-safe) so they can be shown, saved and replayed."""
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_plain(v) for v in value]
+    if hasattr(value, "to_dict"):  # pandas Series / DataFrame
+        return _plain(value.to_dict())
+    if hasattr(value, "tolist"):  # numpy arrays
+        return _plain(value.tolist())
+    if hasattr(value, "item"):  # numpy scalars
+        return value.item()
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _user_error(e: Exception) -> ValueError:
+    """Turn an exception from user code into a readable message with the line number."""
+    import traceback
+    lines = [f.lineno for f in traceback.extract_tb(e.__traceback__) if f.filename == CODE_FILENAME]
+    where = f" (line {lines[-1]})" if lines else ""
+    return ValueError(f"Your code raised {type(e).__name__}: {e}{where}")
+
+
+@step_type("custom_code")
+class CustomCode(Step):
+    """A step written by the user. Runs on this machine with full access, like a Jupyter cell."""
+    kind = "custom"
+
+    def _namespace(self) -> Dict[str, Any]:
+        from app.config import settings
+        if not settings.ALLOW_CUSTOM_CODE:
+            raise ValueError("Custom code is switched off on this server (ALLOW_CUSTOM_CODE=false).")
+        code = self.args.get("code") or ""
+        namespace: Dict[str, Any] = {"pd": pd, "np": np}
+        try:
+            exec(compile(code, CODE_FILENAME, "exec"), namespace)
+        except SyntaxError as e:
+            raise ValueError(f"Your code has a syntax error on line {e.lineno}: {e.msg}") from None
+        except Exception as e:
+            raise _user_error(e) from None
+        for fn in ("learn", "apply"):
+            if not callable(namespace.get(fn)):
+                raise ValueError(f"Your code must define a function called {fn}().")
+        return namespace
+
+    @property
+    def train_only(self) -> bool:
+        return bool(self._namespace().get("TRAIN_ONLY", False))
+
+    def learn(self, train):
+        try:
+            learned = self._namespace()["learn"](train.copy())
+        except ValueError:
+            raise
+        except Exception as e:
+            raise _user_error(e) from None
+        if learned is None:
+            learned = {}
+        if not isinstance(learned, dict):
+            raise ValueError(f"learn() must return a dict (it returned {type(learned).__name__}).")
+        return _plain(learned)
+
+    def apply(self, df, learned):
+        try:
+            out = self._namespace()["apply"](df, learned)
+        except ValueError:
+            raise
+        except Exception as e:
+            raise _user_error(e) from None
+        if not isinstance(out, pd.DataFrame):
+            raise ValueError(f"apply() must return the rows as a DataFrame (it returned {type(out).__name__}).")
+        return out
+
+    def summary(self, before, after, learned):
+        added = [c for c in after.columns if c not in before.columns]
+        dropped = [c for c in before.columns if c not in after.columns]
+        parts = [f"Custom code ran: {len(before)} → {len(after)} rows"]
+        if added:
+            parts.append(f"added columns {added}")
+        if dropped:
+            parts.append(f"removed columns {dropped}")
+        return ", ".join(parts) + "."
 
 
 # Tools that change data and therefore become recipe lines

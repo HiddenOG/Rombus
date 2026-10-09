@@ -61,6 +61,39 @@ async def update_step(session_id: str, step_id: str, body: StepUpdate, _: str = 
     return _respond(session, f"Updated the step and replayed the recipe. {line.message}")
 
 
+class CodeUpdate(BaseModel):
+    code: str
+
+
+@router.put("/session/{session_id}/recipe/{step_id}/code")
+async def update_step_code(session_id: str, step_id: str, body: CodeUpdate, _: str = Depends(verify_api_key)):
+    """Save edited code for a step. A built-in step becomes a custom code step (and remembers what it was)."""
+    session = _session(session_id)
+    try:
+        current = session.recipe[session.index_of(step_id)]
+        based_on = current.args.get("based_on") if current.tool == "custom_code" else {"tool": current.tool, "args": current.args}
+        args = {"code": body.code, **({"based_on": based_on} if based_on else {})}
+        line = session.replace_step(step_id, "custom_code", args)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _respond(session, f"Saved your code and replayed the recipe. {line.message}")
+
+
+@router.post("/session/{session_id}/recipe/{step_id}/revert")
+async def revert_step(session_id: str, step_id: str, _: str = Depends(verify_api_key)):
+    """Turn a custom code step back into the built-in step it started from."""
+    session = _session(session_id)
+    try:
+        current = session.recipe[session.index_of(step_id)]
+        based_on = current.args.get("based_on")
+        if current.tool != "custom_code" or not based_on:
+            raise ValueError("This step wasn't converted from a built-in step, so there's nothing to revert to.")
+        line = session.replace_step(step_id, based_on["tool"], based_on["args"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _respond(session, f"Reverted to the built-in '{line.tool.replace('_', ' ')}' step. {line.message}")
+
+
 @router.delete("/session/{session_id}/recipe/{step_id}")
 async def delete_step(session_id: str, step_id: str, _: str = Depends(verify_api_key)):
     session = _session(session_id)

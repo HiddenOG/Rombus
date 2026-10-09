@@ -137,6 +137,24 @@ function Field({ name, spec, required, value, columns, onChange }) {
         );
     }
 
+    if (spec.format === 'code') {
+        return (
+            <label className="block">
+                {label}
+                <textarea
+                    className={`${input} font-mono text-[12px] leading-[1.45]`}
+                    rows={16}
+                    spellCheck={false}
+                    value={value}
+                    onChange={e => onChange(e.target.value)}
+                />
+                <span className="mt-1 block text-xs text-ink-3">
+                    Runs on your machine with full access, like a Jupyter cell. It will be marked "not verified".
+                </span>
+            </label>
+        );
+    }
+
     if (spec.type === 'object') {
         return (
             <label className="block">
@@ -172,6 +190,7 @@ function toInput(value, spec) {
     if (spec.type === 'array') return Array.isArray(value) ? value : [];
     if (spec.type === 'boolean') return Boolean(value);
     if (spec.type === 'object') return value ? JSON.stringify(value, null, 2) : '';
+    if (value == null && spec.default != null) return String(spec.default);
     return value == null ? '' : String(value);
 }
 

@@ -6,6 +6,7 @@ import { ActionButton } from './ActionButton';
 import { EvidenceCard } from './EvidenceCard';
 import { StepEditor } from './StepEditor';
 import { CodeView } from './CodeView';
+import { CodeEditor } from './CodeEditor';
 
 const humanize = (s) => s.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
 
@@ -14,6 +15,7 @@ const KIND = {
     fixed: { label: 'Changes data', className: 'bg-brand-50 text-brand-700 border-brand-200' },
     train_only: { label: 'Training rows only', className: 'bg-amber-50 text-amber-800 border-amber-200' },
     action: { label: 'Action', className: 'bg-surface-2 text-ink-2 border-line' },
+    custom: { label: '✏️ Custom code · not verified', className: 'bg-amber-50 text-amber-800 border-amber-300' },
     view: { label: 'View', className: 'bg-surface-2 text-ink-2 border-line' },
 };
 
@@ -72,20 +74,35 @@ export function AskCell({ cell, number, onRun, isProcessing }) {
     );
 }
 
-export function RunCell({ cell, number, tool, step, summary, isProcessing, onEdit, onCopy, onDelete, onRerun }) {
+export function RunCell({ cell, number, tool, step, summary, isProcessing, onEdit, onEditCode, onRevert, onCopy, onDelete, onRerun }) {
     const [editing, setEditing] = useState(false);
     const [tab, setTab] = useState('result');
+    const [editingCode, setEditingCode] = useState(false);
     const kind = tool?.kind || 'view';
     const isStep = Boolean(cell.stepId);
     const removed = isStep && !step; // undone or deleted elsewhere
     // Only views can be safely re-run; actions (choose target, train) are never one-click repeats
     const isView = kind === 'view';
     const stale = isView && cell.version && summary?.data_version && cell.version !== summary.data_version;
-    const args = step?.args ?? cell.args ?? {};
+    const isCustom = kind === 'custom';
+    const allArgs = step?.args ?? cell.args ?? {};
+    // Code and its origin are shown in the Code tab, not as setting chips
+    const args = Object.fromEntries(Object.entries(allArgs).filter(([k]) => k !== 'code' && k !== 'based_on'));
     const columns = summary?.columns?.map(c => c.name) || [];
 
     const save = async (newArgs) => {
         if (await onEdit(cell, newArgs)) setEditing(false);
+    };
+    const saveCode = async (code) => {
+        if (await onEditCode(cell, code)) setEditingCode(false);
+    };
+    const startEditing = () => {
+        if (isCustom) {
+            setTab('code');
+            setEditingCode(true);
+        } else {
+            setEditing(e => !e);
+        }
     };
 
     return (
@@ -97,6 +114,9 @@ export function RunCell({ cell, number, tool, step, summary, isProcessing, onEdi
                     <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm font-semibold text-ink">{humanize(cell.tool)}</span>
+                            {step?.based_on && (
+                                <span className="text-xs text-ink-3">(was {humanize(step.based_on.tool)})</span>
+                            )}
                             <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${KIND[kind]?.className}`}>
                                 {KIND[kind]?.label}
                             </span>
@@ -118,7 +138,7 @@ export function RunCell({ cell, number, tool, step, summary, isProcessing, onEdi
                     </div>
                     <div className="flex shrink-0 items-center gap-0.5">
                         {isStep && !removed && (
-                            <IconButton label="Edit settings" onClick={() => setEditing(e => !e)} disabled={isProcessing}>
+                            <IconButton label={isCustom ? 'Edit code' : 'Edit settings'} onClick={startEditing} disabled={isProcessing}>
                                 <Pencil className="h-3.5 w-3.5" />
                             </IconButton>
                         )}
@@ -149,7 +169,27 @@ export function RunCell({ cell, number, tool, step, summary, isProcessing, onEdi
                         </div>
                     )}
 
-                    {editing && tool && (
+                    {isCustom && step && (
+                        <div className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                            <div className="flex items-start gap-2">
+                                <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
+                                <span className="flex-1">
+                                    <strong>Not verified.</strong> This is your own code, so the app can't guarantee it only
+                                    learns from the training rows.
+                                </span>
+                                {step.based_on && (
+                                    <button onClick={() => onRevert(cell)} disabled={isProcessing} className="shrink-0 font-semibold hover:underline">
+                                        Revert to built-in
+                                    </button>
+                                )}
+                            </div>
+                            {step.warnings?.map(w => (
+                                <p key={w} className="rounded-md bg-red-50 px-2 py-1.5 font-medium text-red-800">⚠ {w}</p>
+                            ))}
+                        </div>
+                    )}
+
+                    {editing && tool && !isCustom && (
                         <StepEditor
                             tool={tool}
                             initialArgs={args}
@@ -177,18 +217,38 @@ export function RunCell({ cell, number, tool, step, summary, isProcessing, onEdi
                     )}
 
                     {tab === 'code' && step?.code ? (
-                        <>
-                            <p className="text-xs text-ink-3">
-                                <span className="font-mono text-ink-2">learn()</span> looks at the training rows once;{' '}
-                                <span className="font-mono text-ink-2">apply()</span> uses what it learned on training rows, the test set and new customers.
-                            </p>
-                            <CodeView code={step.code} />
-                        </>
+                        editingCode ? (
+                            <CodeEditor
+                                initialCode={step.editable_code || step.code}
+                                busy={isProcessing}
+                                onSave={saveCode}
+                                onCancel={() => setEditingCode(false)}
+                            />
+                        ) : (
+                            <>
+                                <div className="flex items-start justify-between gap-3">
+                                    <p className="text-xs text-ink-3">
+                                        <span className="font-mono text-ink-2">learn()</span> looks at the training rows once;{' '}
+                                        <span className="font-mono text-ink-2">apply()</span> uses what it learned on training rows, the test set and new customers.
+                                    </p>
+                                    {!removed && (
+                                        <button
+                                            onClick={() => setEditingCode(true)}
+                                            disabled={isProcessing}
+                                            className="flex shrink-0 items-center gap-1 rounded-lg border border-line px-2 py-1 text-xs font-semibold text-ink-2 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
+                                        >
+                                            <Pencil className="h-3 w-3" /> Edit code
+                                        </button>
+                                    )}
+                                </div>
+                                <CodeView code={step.code} />
+                            </>
+                        )
                     ) : (
                         <>
                             <p className="whitespace-pre-wrap text-sm text-ink-2">{step?.message || cell.message}</p>
 
-                            {step && kind === 'learn' && <StickyNoteView learned={step.learned} />}
+                            {step && (kind === 'learn' || isCustom) && <StickyNoteView learned={step.learned} />}
                             {kind === 'train_only' && !removed && (
                                 <p className="text-xs text-ink-3">Applied to the training rows only; skipped for the test set and new customers.</p>
                             )}
@@ -227,6 +287,12 @@ function StickyNoteView({ learned }) {
         rows.push([col, `${classes.length} categories: ${classes.slice(0, 6).join(', ')}${classes.length > 6 ? '…' : ''}`]);
     }
     for (const [col, s] of Object.entries(learned?.scale || {})) rows.push([col, `average ${s.mean}, spread ${s.std}`]);
+    // Custom steps can learn anything: show the other keys as-is
+    for (const [key, value] of Object.entries(learned || {})) {
+        if (['fill', 'classes', 'scale'].includes(key)) continue;
+        const text = JSON.stringify(value);
+        rows.push([key, text.length > 120 ? `${text.slice(0, 120)}…` : text]);
+    }
     if (!rows.length) return null;
 
     return (

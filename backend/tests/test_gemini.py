@@ -29,8 +29,12 @@ def _response(*parts):
 
 class TestDeclarations:
     def test_every_tool_is_declared(self):
+        from app.tools import HIDDEN_FROM_AI
         names = {d["name"] for d in build_tool_declarations()}
-        assert names == set(TOOL_REGISTRY)
+        assert names == set(TOOL_REGISTRY) - HIDDEN_FROM_AI
+
+    def test_ai_is_never_offered_custom_code(self):
+        assert "custom_code" not in {d["name"] for d in build_tool_declarations()}
 
     def test_explanation_is_required(self):
         for decl in build_tool_declarations():
@@ -42,7 +46,8 @@ class TestDeclarations:
             "tools": [{"function_declarations": build_tool_declarations()}],
             "automatic_function_calling": {"disable": True},
         })
-        assert len(config.tools[0].function_declarations) == len(TOOL_REGISTRY)
+        from app.tools import HIDDEN_FROM_AI
+        assert len(config.tools[0].function_declarations) == len(TOOL_REGISTRY) - len(HIDDEN_FROM_AI)
 
 
 class TestContents:

@@ -23,6 +23,9 @@ BEFORE_SPLIT_TOOLS: Set[str] = set()
 #   fixed / learn / train_only   recipe steps (see app/recipe.py)
 TOOL_KINDS: Dict[str, str] = {}
 
+# Tools people can use but the AI is never offered (e.g. running arbitrary code)
+HIDDEN_FROM_AI: Set[str] = set()
+
 
 def register_tool(
     name: str,
@@ -31,6 +34,7 @@ def register_tool(
     required: Optional[List[str]] = None,
     before_split: bool = False,
     kind: str = "view",
+    ai: bool = True,
 ):
     """Decorator to register a tool function along with its argument schema."""
     def decorator(func):
@@ -47,6 +51,8 @@ def register_tool(
         if before_split:
             BEFORE_SPLIT_TOOLS.add(name)
         TOOL_KINDS[name] = kind
+        if not ai:
+            HIDDEN_FROM_AI.add(name)
         return func
     return decorator
 
