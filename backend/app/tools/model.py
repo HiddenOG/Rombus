@@ -15,9 +15,10 @@ from sklearn.linear_model import Ridge, Lasso, LogisticRegression
 from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsRegressor, KNeighborsClassifier
 from sklearn.svm import SVC, SVR
+from sklearn.base import clone
 from sklearn.metrics import (
     mean_squared_error, r2_score, mean_absolute_error,
-    accuracy_score, f1_score, classification_report,
+    accuracy_score, f1_score, classification_report, confusion_matrix,
 )
 
 from app.tools import register_tool, validate_column, categorical_columns
@@ -107,6 +108,26 @@ def target_classes(session: DataSession) -> Optional[List[str]]:
     return None
 
 
+def ensure_practice_split(session: DataSession) -> str:
+    """Do the default practice split if there isn't one yet; returns a note when it did."""
+    if session.X_train is not None:
+        return ""
+    if not session.target_column:
+        raise ValueError("Choose the target column first.")
+    result = do_train_test_split(session, {"stratify": session.problem_type == "classification"})
+    if not result["success"]:
+        raise ValueError(result["message"])
+    return f"(Made a practice split first: {len(session.X_train)} rows to learn from, {len(session.X_test)} to check against.)"
+
+
+def safe_cv_folds(session: DataSession, requested: int) -> int:
+    """Cross-validation folds, capped so every fold can contain every class."""
+    folds = min(int(requested), len(session.X_train))
+    if session.problem_type == "classification":
+        folds = min(folds, int(session.y_train.value_counts().min()))
+    return max(folds, 2)
+
+
 @register_tool(
     "train_test_split",
     "Practice split: divide the training rows into a part to learn from and a part to check against. "
@@ -163,12 +184,11 @@ def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str,
     kind="action",
 )
 def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Train one or more ML models."""
-    if session.X_train is None:
-        return {"success": False, "message": "Split the data first (use 'train_test_split' tool)."}
+    """Train one or more ML models (doing the practice split first if it hasn't happened)."""
+    auto_split = ensure_practice_split(session)
 
     alg_names = args.get("algorithms", ["rf", "gb"])
-    cv_folds = args.get("cv_folds", 5)
+    cv_folds = safe_cv_folds(session, args.get("cv_folds", 5))
 
     model_registry = CLASSIFICATION_MODELS if session.problem_type == "classification" else REGRESSION_MODELS
     results = []
@@ -195,11 +215,12 @@ def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
             result = {"model": alg, "accuracy": acc, "f1_score": f1, "report": report}
 
         # Cross-validation
-        cv_scores = cross_val_score(model, session.X_train, session.y_train, cv=min(cv_folds, len(session.X_train)))
+        cv_scores = cross_val_score(model, session.X_train, session.y_train, cv=cv_folds)
         result["cv_mean"] = round(float(cv_scores.mean()), 4)
         result["cv_std"] = round(float(cv_scores.std()), 4)
 
         session.trained_models[alg] = model
+        session.model_results[alg] = result
         results.append(result)
 
     # Find best model
@@ -207,9 +228,14 @@ def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     valid_results = [r for r in results if score_key in r]
     best = max(valid_results, key=lambda r: r[score_key])["model"] if valid_results else None
 
+    msg = f"Trained {len(alg_names)} models. Best on the practice split: {best}."
+    if auto_split:
+        msg = f"{auto_split} {msg}"
+    if best:
+        msg += " When you're happy with the cleaning and the model, run the final exam on the locked test rows."
     return {
         "success": True,
-        "message": f"Trained {len(alg_names)} models. Best: {best}.",
+        "message": msg,
         "evidence": {"results": results, "best_model": best},
     }
 
@@ -217,8 +243,7 @@ def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
 @register_tool("auto_ml", "Grid-search several algorithms with hyperparameter tuning and report the best.", kind="action")
 def auto_ml(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Automatically find the best model with hyperparameter tuning (AutoML)."""
-    if session.X_train is None:
-        return {"success": False, "message": "Split the data first (use 'train_test_split' tool)."}
+    ensure_practice_split(session)
 
     grids = AUTOML_CLASSIFICATION_GRIDS if session.problem_type == "classification" else AUTOML_REGRESSION_GRIDS
     scoring = "accuracy" if session.problem_type == "classification" else "r2"
@@ -262,6 +287,90 @@ def auto_ml(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         "message": f"AutoML complete. Best model: {best_model_name} (CV score: {best_score:.4f}).",
         "evidence": {"results": results, "best_model": best_model_name},
     }
+
+
+@register_tool(
+    "final_exam",
+    "Score a trained model ONCE on the locked test rows (the honest score). Retrains it on all training "
+    "rows first. Only suggest this when the user is done cleaning and choosing a model; every extra look "
+    "at the test rows makes the score less trustworthy.",
+    {"algorithm": {"type": "string", "description": "Trained model to examine (default: best practice score)."}},
+    kind="action",
+)
+def final_exam(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Retrain on all training rows, then score once on the locked test rows prepared by the recipe."""
+    if not session.is_split:
+        return {"success": False, "message": "Choose the target first: there are no locked test rows yet."}
+    if not session.trained_models:
+        return {"success": False, "message": "Train at least one model first."}
+
+    scored = {a: r.get("cv_mean", float("-inf")) for a, r in session.model_results.items()}
+    name = args.get("algorithm") or (max(scored, key=scored.get) if scored else next(iter(session.trained_models)))
+    if name not in session.trained_models:
+        return {"success": False, "message": f"Model '{name}' isn't trained. Trained: {list(session.trained_models)}."}
+
+    target = session.target_column
+    # 1. The final model learns from ALL training rows (the practice split was only for choosing)
+    X_all = model_features(session.df, target)
+    y_all = session.df[target]
+    model = clone(session.trained_models[name]).fit(X_all, y_all)
+
+    # 2. The locked rows go through the recipe with the TRAINING sticky notes: no learning from them
+    prepared = session.prepare(session.test_df)
+    X_test = model_features(prepared, target).reindex(columns=X_all.columns, fill_value=0)
+    y_test = prepared[target]
+    predicted = model.predict(X_test)
+
+    session.exam_count += 1
+    session.trained_models[name] = model  # predictions now use the model trained on all rows
+    if session.current_stage in ("ACQUIRE", "SCRUB", "EXPLORE", "MODEL"):
+        session.current_stage = "INTERPRET"
+
+    exam: Dict[str, Any] = {
+        "model": name,
+        "test_rows": int(len(y_test)),
+        "look": session.exam_count,
+        "practice": session.model_results.get(name, {}).get("cv_mean"),
+        "problem": session.problem_type,
+    }
+    if session.problem_type == "classification":
+        majority = y_all.mode().iloc[0]
+        labels = sorted(pd.unique(pd.concat([y_test, pd.Series(predicted)]).astype(str)))
+        matrix = confusion_matrix(y_test.astype(str), pd.Series(predicted).astype(str), labels=labels)
+        exam |= {
+            "metric": "accuracy",
+            "score": round(float(accuracy_score(y_test, predicted)), 4),
+            "baseline": round(float((y_test == majority).mean()), 4),
+            "baseline_label": f"always guessing '{majority}'",
+            "f1": round(float(f1_score(y_test, predicted, average="weighted", zero_division=0)), 4),
+            "labels": labels,
+            "confusion": matrix.tolist(),
+        }
+    else:
+        mean = float(y_all.mean())
+        exam |= {
+            "metric": "R²",
+            "score": round(float(r2_score(y_test, predicted)), 4),
+            "baseline": round(float(r2_score(y_test, np.full(len(y_test), mean))), 4),
+            "baseline_label": f"always guessing the training average ({mean:.3g})",
+            "mae": round(float(mean_absolute_error(y_test, predicted)), 4),
+            "baseline_mae": round(float(mean_absolute_error(y_test, np.full(len(y_test), mean))), 4),
+        }
+
+    exam["no_better_than_guessing"] = exam["score"] <= exam["baseline"] + 0.01
+    msg = (
+        f"Final exam for {name}: {exam['metric']} {exam['score']} on {exam['test_rows']} locked rows it never saw "
+        f"(baseline, {exam['baseline_label']}: {exam['baseline']})."
+    )
+    if exam["no_better_than_guessing"]:
+        msg += (" Warning: the model is no better than just guessing, so the score looks good only because one "
+                "answer is common. Try other models, more informative columns, or balancing the classes.")
+    if exam["practice"] is not None and exam["practice"] - exam["score"] > 0.05:
+        msg += f" That's well below the practice score ({exam['practice']}): the model may be overfitting."
+    if session.exam_count > 1:
+        msg += (f" Note: this is look #{session.exam_count} at the test rows. Every extra look makes this score less "
+                f"trustworthy, because choices start being tuned to the exam.")
+    return {"success": True, "message": msg, "evidence": {"exam": exam}}
 
 
 @register_tool(

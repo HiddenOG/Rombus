@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy } from 'lucide-react';
+import { Trophy, GraduationCap } from 'lucide-react';
 import { ChartRenderer } from './ChartRenderer';
 
 /**
@@ -23,6 +23,8 @@ export function EvidenceCard({ evidence }) {
             )}
 
             {evidence.results && <ModelResults results={evidence.results} bestModel={evidence.best_model} />}
+
+            {evidence.exam && <ExamCard exam={evidence.exam} />}
 
             {evidence.prediction && (
                 <div className="rounded-xl border border-brand-200 bg-brand-50 p-4">
@@ -106,6 +108,101 @@ function DescribeTable({ data }) {
                     ))}
                 </tbody>
             </table>
+        </div>
+    );
+}
+
+const asScore = (value, metric) => (value == null ? '–' : metric === 'accuracy' ? `${(value * 100).toFixed(1)}%` : value.toFixed(3));
+
+function ExamCard({ exam }) {
+    const rows = [
+        { label: `Model (${exam.model})`, value: exam.score, className: 'bg-brand-500' },
+        { label: `Just guessing: ${exam.baseline_label}`, value: exam.baseline, className: 'bg-ink-3/50' },
+        ...(exam.practice != null ? [{ label: 'Practice score (during training)', value: exam.practice, className: 'bg-brand-200' }] : []),
+    ];
+    const max = Math.max(1, ...rows.map(r => r.value ?? 0));
+
+    return (
+        <div className="space-y-4 rounded-xl border border-brand-200 bg-surface p-4">
+            <div className="flex items-start justify-between gap-4">
+                <div>
+                    <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-brand-700">
+                        <GraduationCap className="h-3.5 w-3.5" /> Final exam · honest score
+                    </p>
+                    <p className="mt-1 text-4xl font-bold tabular-nums text-ink">{asScore(exam.score, exam.metric)}</p>
+                    <p className="mt-0.5 text-sm text-ink-2">
+                        {exam.metric} on <strong>{exam.test_rows}</strong> locked rows the model never saw and no step learned from
+                    </p>
+                </div>
+                <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${exam.look > 1 ? 'bg-amber-100 text-amber-900' : 'bg-emerald-50 text-emerald-800'}`}>
+                    Look #{exam.look}
+                </span>
+            </div>
+
+            <div className="space-y-2">
+                {rows.map(r => (
+                    <div key={r.label}>
+                        <div className="mb-0.5 flex justify-between text-xs">
+                            <span className="text-ink-2">{r.label}</span>
+                            <span className="font-mono font-semibold tabular-nums text-ink">{asScore(r.value, exam.metric)}</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-surface-2">
+                            <div className={`h-full rounded-full ${r.className}`} style={{ width: `${Math.max(0, (r.value ?? 0) / max) * 100}%` }} />
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {exam.no_better_than_guessing && (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800">
+                    ⚠ No better than just guessing. The score only looks good because one answer is very common:
+                    {exam.baseline_label} scores the same. This model hasn't learned anything useful yet.
+                </p>
+            )}
+
+            {exam.look > 1 && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    This is look #{exam.look} at the test rows. Each extra look makes the score less trustworthy: you start
+                    choosing whatever happens to work on these particular rows.
+                </p>
+            )}
+
+            {exam.confusion && (
+                <div>
+                    <p className="mb-1.5 text-xs font-semibold text-ink-2">Where it was right and wrong (rows: actual, columns: predicted)</p>
+                    <table className="text-xs">
+                        <thead>
+                            <tr>
+                                <th />
+                                {exam.labels.map(l => <th key={l} className="px-3 py-1 font-mono font-medium text-ink-3">{l}</th>)}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {exam.confusion.map((row, i) => (
+                                <tr key={exam.labels[i]}>
+                                    <td className="pr-3 text-right font-mono font-medium text-ink-3">{exam.labels[i]}</td>
+                                    {row.map((count, j) => (
+                                        <td key={j} className="p-0.5">
+                                            <div className={`min-w-12 rounded-md px-3 py-1.5 text-center font-mono font-semibold tabular-nums ${
+                                                i === j ? 'bg-emerald-50 text-emerald-800' : count ? 'bg-red-50 text-red-800' : 'bg-surface-2 text-ink-3'
+                                            }`}>
+                                                {count}
+                                            </div>
+                                        </td>
+                                    ))}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            {exam.mae != null && (
+                <p className="text-xs text-ink-2">
+                    Average error: <span className="font-mono font-semibold text-ink">{exam.mae}</span> (guessing the average:{' '}
+                    <span className="font-mono">{exam.baseline_mae}</span>)
+                </p>
+            )}
         </div>
     );
 }

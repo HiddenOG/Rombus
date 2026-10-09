@@ -35,6 +35,8 @@ class DataSession:
         self.y_train = None
         self.y_test = None
         self.trained_models: Dict[str, Any] = {}
+        # Practice-split scores per algorithm, shown next to the final exam score
+        self.model_results: Dict[str, Dict[str, Any]] = {}
         # Final exam: rows locked away when the target is chosen, untouched until evaluation
         self.test_df: Optional[pd.DataFrame] = None
         self.test_size: Optional[float] = None
@@ -81,6 +83,7 @@ class DataSession:
         had_models = bool(self.trained_models) or self.X_train is not None
         self.X_train = self.X_test = self.y_train = self.y_test = None
         self.trained_models = {}
+        self.model_results = {}
         return had_models
 
     def add_step(self, tool: str, args: Dict[str, Any]) -> Line:
