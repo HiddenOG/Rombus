@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from app.auth import verify_api_key
 from app.models import ChatRequest, ChatResponse
 from app.session import session_manager
-from app.gemini import get_copilot_response
+from app.copilot import get_copilot_response
 
 router = APIRouter()
 

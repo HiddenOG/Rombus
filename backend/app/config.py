@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Literal
 import os
 
 
@@ -11,6 +12,15 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
+
+    # Which AI answers the chat: "gemini" (Google, cloud) or "ollama" (local model)
+    AI_PROVIDER: Literal["gemini", "ollama"] = "gemini"
+
+    # Local models via Ollama
+    OLLAMA_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "qwen3.5:2b"
+    OLLAMA_CONTEXT: int = 8192
+    OLLAMA_TIMEOUT_SECONDS: float = 180
 
     # Google Gemini
     GOOGLE_API_KEY: str = ""

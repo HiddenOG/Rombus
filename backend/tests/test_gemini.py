@@ -1,4 +1,4 @@
-"""Tests for the Gemini copilot integration (no network calls)."""
+﻿"""Tests for the Gemini copilot integration (no network calls)."""
 
 import pandas as pd
 import pytest
@@ -133,7 +133,7 @@ class TestBackupModels:
         from app import gemini
         fake = FakeGoogle(failures)
         monkeypatch.setattr(gemini, "_get_client", lambda: fake)
-        return asyncio.run(gemini.get_copilot_response(session, "hi")), fake.calls
+        return asyncio.run(gemini.get_gemini_response(session, "hi")), fake.calls
 
     def test_main_model_answers(self, monkeypatch, session):
         out, calls = self.ask(monkeypatch, session, {})
@@ -154,6 +154,11 @@ class TestBackupModels:
         out, calls = self.ask(monkeypatch, session, {"main": 503, "backup1": 503, "backup2": 500})
         assert out["response"] == BUSY_MESSAGE
         assert calls == ["main", "backup1", "backup2"]
+
+    def test_all_out_of_allowance_says_so(self, monkeypatch, session):
+        from app.gemini import QUOTA_MESSAGE
+        out, _ = self.ask(monkeypatch, session, {"main": 429, "backup1": 429, "backup2": 429})
+        assert out["response"] == QUOTA_MESSAGE
 
     def test_bad_key_does_not_try_backups(self, monkeypatch, session):
         from app.gemini import KEY_MESSAGE
