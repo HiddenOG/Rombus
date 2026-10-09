@@ -90,7 +90,7 @@ export function useSession() {
                 addMessage('system', data.message);
 
                 if (data.evidence) {
-                    addMessage('ai', `Analysis results for ${action.tool}:`, [], data.evidence);
+                    addMessage('ai', `Here's the result of **${action.tool.replace(/_/g, ' ')}**:`, [], data.evidence);
                 }
 
                 // Auto-ask for next step

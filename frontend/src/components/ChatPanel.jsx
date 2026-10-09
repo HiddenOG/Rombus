@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Brain, Loader2, Send, AlertCircle, X } from 'lucide-react';
+import { Loader2, ArrowUp, AlertCircle, X, Lock, LineChart, Wand2 } from 'lucide-react';
+import { Logo } from './Logo';
 import { StageProgress } from './StageProgress';
 import { MessageBubble } from './MessageBubble';
 
 /**
- * ChatPanel — main chat area with messages and input.
+ * ChatPanel — conversation with the copilot, plus the input box.
  */
 export function ChatPanel({
     chatHistory,
@@ -28,101 +29,115 @@ export function ChatPanel({
     };
 
     return (
-        <div className="flex-1 flex flex-col overflow-hidden bg-white relative min-w-0">
-            {/* Header — fixed height, never scrolls */}
-            <div className="shrink-0 h-14 border-b border-gray-200 flex items-center justify-between px-6 bg-white z-10">
-                <div className="flex items-center gap-3">
-                    <div
-                        className={`w-2.5 h-2.5 rounded-full transition-colors ${isProcessing ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
-                            }`}
-                    />
-                    <span className="font-semibold text-gray-700 text-base">AI Copilot</span>
+        <main className="flex-1 flex flex-col overflow-hidden min-w-0">
+            {/* Header */}
+            <header className="shrink-0 h-16 px-6 flex items-center justify-between gap-4 border-b border-line bg-surface/70 backdrop-blur">
+                <div className="flex items-center gap-2.5 text-sm">
+                    <span className="relative flex h-2.5 w-2.5">
+                        {isProcessing && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-60" />}
+                        <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${isProcessing ? 'bg-brand-500' : 'bg-emerald-500'}`} />
+                    </span>
+                    <span className="font-semibold text-ink">Copilot</span>
+                    <span className="text-ink-3">{isProcessing ? 'thinking…' : 'ready'}</span>
                 </div>
                 <StageProgress currentStage={currentStage} />
-            </div>
+            </header>
 
-            {/* Messages — THIS is the scrollable area */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-5 bg-linear-to-b from-gray-50/50 to-white custom-scrollbar">
-                {chatHistory.length === 0 && <EmptyState />}
-
-                {chatHistory.map((msg, i) => (
-                    <MessageBubble
-                        key={i}
-                        message={msg}
-                        onAction={onAction}
-                        isProcessing={isProcessing}
-                    />
-                ))}
-                <div ref={chatEndRef} />
-            </div>
-
-            {/* Error display */}
-            {error && (
-                <div className="shrink-0 mx-6 mb-2 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-red-700 text-sm animate-in">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span className="flex-1">{error}</span>
-                    <button
-                        onClick={onClearError}
-                        className="hover:bg-red-100 rounded-full p-1 transition-colors"
-                    >
-                        <X className="w-4 h-4" />
-                    </button>
+            {/* Conversation */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+                <div className="mx-auto max-w-3xl px-6 py-8 space-y-6">
+                    {chatHistory.length === 0 && <EmptyState />}
+                    {chatHistory.map((msg, i) => (
+                        <MessageBubble key={i} message={msg} onAction={onAction} isProcessing={isProcessing} />
+                    ))}
+                    {isProcessing && chatHistory.length > 0 && <ThinkingIndicator />}
+                    <div ref={chatEndRef} />
                 </div>
-            )}
+            </div>
 
-            {/* Input Area — fixed at bottom, never scrolls */}
-            <div className="shrink-0 p-4 bg-white border-t border-gray-200">
-                <form onSubmit={handleSubmit} className="relative">
-                    <input
-                        type="text"
-                        value={inputMessage}
-                        onChange={(e) => setInputMessage(e.target.value)}
-                        placeholder={
-                            sessionId
-                                ? 'Ask about the data or discuss the next step...'
-                                : 'Upload a dataset to start'
-                        }
-                        disabled={!sessionId || isProcessing}
-                        className="w-full pl-5 pr-14 py-3.5 bg-gray-100 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all outline-hidden text-base placeholder:text-gray-400"
-                    />
-                    <button
-                        type="submit"
-                        disabled={!sessionId || isProcessing || !inputMessage.trim()}
-                        className="absolute right-1.5 top-1.5 bottom-1.5 px-4 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            {/* Input */}
+            <div className="shrink-0 px-6 pb-5 pt-2">
+                <div className="mx-auto max-w-3xl">
+                    {error && (
+                        <div className="mb-3 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800 animate-in">
+                            <AlertCircle className="w-4 h-4 shrink-0" />
+                            <span className="flex-1">{error}</span>
+                            <button onClick={onClearError} aria-label="Dismiss error" className="rounded-full p-1 hover:bg-red-100">
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                    )}
+                    <form
+                        onSubmit={handleSubmit}
+                        className="flex items-center gap-2 rounded-2xl border border-line bg-surface p-2 pl-4 shadow-[0_2px_12px_rgba(28,25,23,0.06)] transition-shadow focus-within:border-brand-300 focus-within:ring-4 focus-within:ring-brand-100"
                     >
-                        {isProcessing ? (
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                        ) : (
-                            <Send className="w-5 h-5" />
-                        )}
-                    </button>
-                </form>
-                <div className="flex justify-center mt-2">
-                    <p className="text-xs text-gray-400 tracking-wide">
-                        ASEMIC Workflow • Statistical Evidence • Human-in-the-Loop
+                        <input
+                            type="text"
+                            value={inputMessage}
+                            onChange={(e) => setInputMessage(e.target.value)}
+                            placeholder={sessionId ? 'Ask about your data or the next step…' : 'Upload a dataset to start'}
+                            disabled={!sessionId || isProcessing}
+                            className="flex-1 bg-transparent py-2 text-[15px] text-ink outline-none placeholder:text-ink-3 disabled:cursor-not-allowed"
+                        />
+                        <button
+                            type="submit"
+                            aria-label="Send"
+                            disabled={!sessionId || isProcessing || !inputMessage.trim()}
+                            className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-500 text-white transition-colors hover:bg-brand-600 disabled:bg-surface-2 disabled:text-ink-3 disabled:cursor-not-allowed"
+                        >
+                            {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowUp className="w-5 h-5" />}
+                        </button>
+                    </form>
+                    <p className="mt-2 text-center text-xs text-ink-3">
+                        The copilot only suggests. Nothing changes until you press Run.
                     </p>
                 </div>
             </div>
+        </main>
+    );
+}
+
+function ThinkingIndicator() {
+    return (
+        <div className="flex items-center gap-3 pl-11 text-sm text-ink-3">
+            <span className="flex gap-1">
+                {[0, 150, 300].map(delay => (
+                    <span
+                        key={delay}
+                        className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-400"
+                        style={{ animationDelay: `${delay}ms` }}
+                    />
+                ))}
+            </span>
+            Thinking…
         </div>
     );
 }
 
 function EmptyState() {
+    const points = [
+        { icon: Lock, title: 'Honest scores', text: 'A test set is locked away before you see any statistics.' },
+        { icon: Wand2, title: 'You stay in control', text: 'The AI suggests each step; you decide what runs.' },
+        { icon: LineChart, title: 'Evidence first', text: 'Every suggestion is backed by your data’s numbers.' },
+    ];
+
     return (
-        <div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-20">
-            <div className="w-24 h-24 bg-linear-to-br from-indigo-100 to-purple-100 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-indigo-50">
-                <Brain className="w-12 h-12 text-indigo-600" />
-            </div>
-            <h2 className="text-3xl font-bold text-gray-800 mb-3">AutoML Copilot</h2>
-            <p className="text-gray-500 text-base leading-relaxed">
-                AI-powered data science assistant. Upload a dataset and I'll guide you through
-                the ASEMIC workflow — from data acquisition to model communication.
+        <div className="pt-12 text-center">
+            <Logo size={72} className="mx-auto mb-6 drop-shadow-md" />
+            <h2 className="text-3xl font-bold tracking-tight text-ink">Your data science copilot</h2>
+            <p className="mx-auto mt-3 max-w-md text-[15px] leading-relaxed text-ink-2">
+                Upload a spreadsheet and build a prediction model step by step, with an AI that explains
+                every move.
             </p>
-            <div className="flex flex-wrap gap-2.5 mt-6 justify-center">
-                {['Upload CSV', 'Clean Data', 'Explore Patterns', 'Train Models', 'Get Predictions'].map(step => (
-                    <span key={step} className="text-xs bg-gray-100 text-gray-500 px-3 py-1.5 rounded-full font-medium">
-                        {step}
-                    </span>
+            <div className="mt-10 grid gap-3 text-left sm:grid-cols-3">
+                {points.map(({ icon: Icon, title, text }) => (
+                    <div key={title} className="rounded-2xl border border-line bg-surface p-4">
+                        <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50">
+                            <Icon className="h-4 w-4 text-brand-600" />
+                        </div>
+                        <p className="text-sm font-semibold text-ink">{title}</p>
+                        <p className="mt-1 text-xs leading-relaxed text-ink-3">{text}</p>
+                    </div>
                 ))}
             </div>
         </div>

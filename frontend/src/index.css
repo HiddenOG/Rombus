@@ -1,34 +1,63 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap')
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap')
 layer(base);
 
 @import 'tailwindcss';
 
 /*
-  The default border color has changed to `currentcolor` in Tailwind CSS v4,
-  so we've added these compatibility styles to make sure everything still
-  looks the same as it did with Tailwind CSS v3.
-
-  If we ever want to remove these styles, we need to add an explicit border
-  color utility to any element that depends on these defaults.
+  Design tokens — the app's whole look lives here.
+  Components use these names (bg-brand-500, text-ink, border-line …), never raw colors,
+  so changing the theme means editing this block only.
 */
+@theme inline {
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
+
+  /* Accent: orange. Used for actions and highlights, sparingly. */
+  --color-brand-50: var(--color-orange-50);
+  --color-brand-100: var(--color-orange-100);
+  --color-brand-200: var(--color-orange-200);
+  --color-brand-300: var(--color-orange-300);
+  --color-brand-400: var(--color-orange-400);
+  --color-brand-500: var(--color-orange-500);
+  --color-brand-600: var(--color-orange-600);
+  --color-brand-700: var(--color-orange-700);
+  --color-brand-800: var(--color-orange-800);
+
+  /* Warm neutrals for surfaces, text and lines */
+  --color-canvas: #faf7f2;        /* page background */
+  --color-surface: #ffffff;       /* cards and panels */
+  --color-surface-2: #f6f2ec;     /* subtle fills: inputs, table headers */
+  --color-line: #ebe5dd;          /* borders and dividers */
+  --color-ink: #1c1917;           /* main text */
+  --color-ink-2: #57534e;         /* secondary text */
+  --color-ink-3: #8a837b;         /* muted text, labels */
+}
+
 @layer base {
   *,
   ::after,
   ::before,
   ::backdrop,
   ::file-selector-button {
-    border-color: var(--color-gray-200, currentcolor);
+    border-color: var(--color-line);
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: var(--color-orange-200);
+    color: var(--color-ink);
   }
 }
 
-/* Base styles */
-* {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-
-/* Custom scrollbar */
+/* Thin, quiet scrollbars */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
+  width: 6px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
@@ -36,26 +65,55 @@ layer(base);
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border-radius: 4px;
+  background: #ddd5cb;
+  border-radius: 6px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: #c4b9ac;
 }
 
-/* Smooth animations */
+/* Gentle entrance for new messages */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 .animate-in {
-  animation: fadeIn 0.3s ease-out;
+  animation: fadeIn 0.25s ease-out;
 }
 
-/* Selection color */
-::selection {
-  background: #c7d2fe;
-  color: #312e81;
+/* AI replies rendered from Markdown */
+.prose-chat > * + * {
+  margin-top: 0.6em;
+}
+
+.prose-chat strong {
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.prose-chat ul,
+.prose-chat ol {
+  padding-left: 1.25em;
+}
+
+.prose-chat ul { list-style: disc; }
+.prose-chat ol { list-style: decimal; }
+
+.prose-chat li + li {
+  margin-top: 0.25em;
+}
+
+.prose-chat li::marker {
+  color: var(--color-orange-400);
+}
+
+.prose-chat code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  padding: 0.1em 0.35em;
 }

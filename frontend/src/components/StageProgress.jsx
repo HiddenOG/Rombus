@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity } from 'lucide-react';
+import { Check } from 'lucide-react';
 
 const STAGES = ['ACQUIRE', 'SCRUB', 'EXPLORE', 'MODEL', 'INTERPRET', 'COMMUNICATE'];
 
@@ -12,36 +12,43 @@ const STAGE_LABELS = {
     COMMUNICATE: 'Communicate',
 };
 
+/**
+ * StageProgress — the ASEMIC workflow as a labeled stepper.
+ */
 export function StageProgress({ currentStage }) {
     const currentIdx = STAGES.indexOf(currentStage);
 
     return (
-        <div className="flex items-center gap-1.5">
+        <ol className="flex items-center gap-1" aria-label="Workflow stages">
             {STAGES.map((s, i) => {
-                const isCompleted = currentIdx > i;
+                const isDone = currentIdx > i;
                 const isCurrent = currentIdx === i;
 
                 return (
-                    <div key={s} className="flex items-center gap-1.5">
-                        <div className="group relative">
-                            <div
-                                className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${isCompleted
-                                        ? 'bg-emerald-500 shadow-xs shadow-emerald-200'
-                                        : isCurrent
-                                            ? 'bg-indigo-500 shadow-xs shadow-indigo-200 ring-2 ring-indigo-200 animate-pulse'
-                                            : 'bg-gray-200'
-                                    }`}
-                            />
-                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-sm opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-30">
-                                {STAGE_LABELS[s]}
-                            </div>
-                        </div>
+                    <li key={s} className="flex items-center gap-1">
+                        <span
+                            aria-current={isCurrent ? 'step' : undefined}
+                            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                                isCurrent
+                                    ? 'bg-brand-500 text-white shadow-sm shadow-brand-200'
+                                    : isDone
+                                        ? 'bg-brand-50 text-brand-700'
+                                        : 'text-ink-3'
+                            }`}
+                        >
+                            {isDone ? (
+                                <Check className="w-3 h-3" />
+                            ) : (
+                                <span className={`text-[10px] font-semibold ${isCurrent ? 'text-white/80' : ''}`}>{i + 1}</span>
+                            )}
+                            <span className="hidden lg:inline">{STAGE_LABELS[s]}</span>
+                        </span>
                         {i < STAGES.length - 1 && (
-                            <div className={`w-4 h-0.5 ${currentIdx > i ? 'bg-emerald-300' : 'bg-gray-200'} transition-colors`} />
+                            <span className={`h-px w-3 ${isDone ? 'bg-brand-300' : 'bg-line'}`} />
                         )}
-                    </div>
+                    </li>
                 );
             })}
-        </div>
+        </ol>
     );
 }

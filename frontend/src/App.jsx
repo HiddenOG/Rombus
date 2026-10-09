@@ -24,10 +24,9 @@ const App = () => {
 
   return (
     <ErrorBoundary>
-      <div className="flex h-screen overflow-hidden bg-gray-50 font-sans text-gray-900 antialiased">
+      <div className="flex h-screen overflow-hidden bg-canvas font-sans text-ink">
         <Sidebar
           sessionId={sessionId}
-          currentStage={currentStage}
           summary={summary}
           onFileUpload={handleUpload}
           isProcessing={isProcessing}

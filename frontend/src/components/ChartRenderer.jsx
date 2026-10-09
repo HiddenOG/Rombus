@@ -1,10 +1,11 @@
 import React from 'react';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-    ScatterChart, Scatter, Cell, Legend,
+    ScatterChart, Scatter, Legend,
 } from 'recharts';
+import { SERIES, GROUPS, OTHER, GRID, AXIS, tooltipStyle } from '../lib/chartColors';
 
-const COLORS = ['#6366f1', '#8b5cf6', '#a78bfa', '#c4b5fd', '#818cf8', '#4f46e5', '#4338ca', '#3730a3'];
+const axisTick = { fontSize: 11, fill: AXIS };
 
 /**
  * ChartRenderer — renders chart-ready evidence data using Recharts.
@@ -15,60 +16,60 @@ export function ChartRenderer({ evidence }) {
     switch (evidence.chart_type) {
         case 'histogram':
         case 'bar':
-            return <HistogramChart data={evidence.chart_data} title={evidence.title} xKey={evidence.x_key} yKey={evidence.y_key} />;
+            return <BarChartCard data={evidence.chart_data} title={evidence.title} xKey={evidence.x_key} yKey={evidence.y_key} />;
         case 'boxplot':
-            return <BoxPlotDisplay data={evidence.chart_data} title={evidence.title} />;
+            return <BoxPlotCard data={evidence.chart_data} title={evidence.title} />;
         case 'heatmap':
-            return <CorrelationDisplay data={evidence.correlation} columns={evidence.columns} title={evidence.title} />;
+            return <CorrelationCard data={evidence.correlation} columns={evidence.columns} title={evidence.title} />;
         case 'scatter':
-            return <ScatterPlot data={evidence.chart_data} x={evidence.x} y={evidence.y} hue={evidence.hue} title={evidence.title} />;
+            return <ScatterCard data={evidence.chart_data} x={evidence.x} y={evidence.y} hue={evidence.hue} title={evidence.title} />;
         default:
             return null;
     }
 }
 
-function HistogramChart({ data, title, xKey = 'bin', yKey = 'count' }) {
-    if (!data?.length) return null;
-
-    // For feature importance, use feature/importance keys
-    const actualXKey = data[0]?.feature ? 'feature' : xKey;
-    const actualYKey = data[0]?.importance ? 'importance' : yKey;
-
+function ChartCard({ title, children, footer }) {
     return (
-        <div className="mt-3 bg-white rounded-xl border border-gray-100 p-4 shadow-xs">
-            {title && <p className="text-xs font-bold text-gray-600 mb-3 uppercase tracking-wider">{title}</p>}
-            <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis
-                        dataKey={actualXKey}
-                        tick={{ fontSize: 10, fill: '#6b7280' }}
-                        angle={-30}
-                        textAnchor="end"
-                        height={60}
-                    />
-                    <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} />
-                    <Tooltip
-                        contentStyle={{
-                            backgroundColor: '#1f2937',
-                            border: 'none',
-                            borderRadius: '8px',
-                            color: '#fff',
-                            fontSize: '11px',
-                        }}
-                    />
-                    <Bar dataKey={actualYKey} radius={[4, 4, 0, 0]}>
-                        {data.map((_, i) => (
-                            <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                        ))}
-                    </Bar>
-                </BarChart>
-            </ResponsiveContainer>
-        </div>
+        <figure className="rounded-xl border border-line bg-surface p-4">
+            {title && <figcaption className="mb-3 text-sm font-semibold text-ink">{title}</figcaption>}
+            {children}
+            {footer}
+        </figure>
     );
 }
 
-function BoxPlotDisplay({ data, title }) {
+function BarChartCard({ data, title, xKey = 'bin', yKey = 'count' }) {
+    if (!data?.length) return null;
+
+    // Feature importance uses feature/importance keys
+    const actualXKey = data[0]?.feature ? 'feature' : xKey;
+    const actualYKey = data[0]?.importance != null ? 'importance' : yKey;
+
+    return (
+        <ChartCard title={title}>
+            <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={data} margin={{ top: 4, right: 8, left: -12, bottom: 4 }} barCategoryGap={2}>
+                    <CartesianGrid vertical={false} stroke={GRID} />
+                    <XAxis
+                        dataKey={actualXKey}
+                        tick={axisTick}
+                        tickLine={false}
+                        axisLine={{ stroke: GRID }}
+                        angle={-30}
+                        textAnchor="end"
+                        height={56}
+                        interval="preserveStartEnd"
+                    />
+                    <YAxis tick={axisTick} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={tooltipStyle} cursor={{ fill: 'rgba(235, 104, 52, 0.08)' }} />
+                    <Bar dataKey={actualYKey} fill={SERIES} radius={[4, 4, 0, 0]} />
+                </BarChart>
+            </ResponsiveContainer>
+        </ChartCard>
+    );
+}
+
+function BoxPlotCard({ data, title }) {
     if (!data) return null;
 
     const stats = [
@@ -79,145 +80,159 @@ function BoxPlotDisplay({ data, title }) {
         { label: 'Max', value: data.max },
     ];
 
-    // Compute IQR and range for the visual
     const range = data.max - data.min;
-    const getPos = (val) => ((val - data.min) / (range || 1)) * 100;
+    const pos = (val) => ((val - data.min) / (range || 1)) * 100;
 
     return (
-        <div className="mt-3 bg-white rounded-xl border border-gray-100 p-4 shadow-xs">
-            {title && <p className="text-xs font-bold text-gray-600 mb-3 uppercase tracking-wider">{title}</p>}
-
-            {/* Visual box plot */}
-            <div className="relative h-12 mx-8 mb-4">
-                {/* Whisker line */}
+        <ChartCard title={title}>
+            <div className="relative mx-6 mb-5 h-12">
                 <div
-                    className="absolute top-1/2 -translate-y-1/2 h-0.5 bg-gray-400"
-                    style={{ left: `${getPos(data.min)}%`, right: `${100 - getPos(data.max)}%` }}
+                    className="absolute top-1/2 h-px -translate-y-1/2 bg-ink-3"
+                    style={{ left: `${pos(data.min)}%`, right: `${100 - pos(data.max)}%` }}
                 />
-                {/* Box */}
                 <div
-                    className="absolute top-1 bottom-1 bg-indigo-100 border-2 border-indigo-400 rounded-sm"
-                    style={{ left: `${getPos(data.q1)}%`, width: `${getPos(data.q3) - getPos(data.q1)}%` }}
+                    className="absolute top-1.5 bottom-1.5 rounded-md border-2"
+                    style={{
+                        left: `${pos(data.q1)}%`,
+                        width: `${pos(data.q3) - pos(data.q1)}%`,
+                        borderColor: SERIES,
+                        background: 'rgba(235, 104, 52, 0.12)',
+                    }}
                 />
-                {/* Median line */}
-                <div
-                    className="absolute top-0.5 bottom-0.5 w-0.5 bg-indigo-700"
-                    style={{ left: `${getPos(data.median)}%` }}
-                />
-                {/* Min/max whisker caps */}
-                <div className="absolute top-2 bottom-2 w-0.5 bg-gray-400" style={{ left: `${getPos(data.min)}%` }} />
-                <div className="absolute top-2 bottom-2 w-0.5 bg-gray-400" style={{ left: `${getPos(data.max)}%` }} />
+                <div className="absolute top-0.5 bottom-0.5 w-0.5 bg-ink" style={{ left: `${pos(data.median)}%` }} />
+                <div className="absolute top-3 bottom-3 w-px bg-ink-3" style={{ left: `${pos(data.min)}%` }} />
+                <div className="absolute top-3 bottom-3 w-px bg-ink-3" style={{ left: `${pos(data.max)}%` }} />
             </div>
 
-            {/* Stats grid */}
             <div className="grid grid-cols-5 gap-2 text-center">
                 {stats.map(s => (
-                    <div key={s.label} className="bg-gray-50 rounded-lg p-2">
-                        <div className="text-[10px] text-gray-400 uppercase font-bold">{s.label}</div>
-                        <div className="text-xs font-mono font-bold text-gray-700">{s.value?.toFixed(2)}</div>
+                    <div key={s.label} className="rounded-lg bg-surface-2 px-2 py-1.5">
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">{s.label}</div>
+                        <div className="font-mono text-xs font-semibold tabular-nums text-ink">{s.value?.toFixed(2)}</div>
                     </div>
                 ))}
             </div>
 
             {data.outlier_count > 0 && (
-                <p className="mt-2 text-[10px] text-orange-600 font-medium">
-                    ⚠ {data.outlier_count} outlier{data.outlier_count > 1 ? 's' : ''} detected
+                <p className="mt-2.5 text-xs font-medium text-amber-800">
+                    ⚠ {data.outlier_count} outlier{data.outlier_count > 1 ? 's' : ''} beyond the whiskers
                 </p>
             )}
-        </div>
+        </ChartCard>
     );
 }
 
-function CorrelationDisplay({ data, columns, title }) {
+// Diverging scale: blue = move in opposite directions, gray = no relationship, orange = move together
+function correlationCell(val) {
+    if (val >= 0.7) return 'bg-orange-600 text-white';
+    if (val >= 0.4) return 'bg-orange-300 text-ink';
+    if (val >= 0.1) return 'bg-orange-100 text-ink';
+    if (val > -0.1) return 'bg-surface-2 text-ink-3';
+    if (val > -0.4) return 'bg-blue-100 text-ink';
+    if (val > -0.7) return 'bg-blue-300 text-ink';
+    return 'bg-blue-700 text-white';
+}
+
+function CorrelationCard({ data, columns, title }) {
     if (!data || !columns) return null;
 
-    const getColor = (val) => {
-        if (val >= 0.7) return 'bg-indigo-600 text-white';
-        if (val >= 0.4) return 'bg-indigo-300 text-indigo-900';
-        if (val >= 0) return 'bg-indigo-50 text-indigo-700';
-        if (val >= -0.4) return 'bg-red-50 text-red-700';
-        if (val >= -0.7) return 'bg-red-300 text-red-900';
-        return 'bg-red-600 text-white';
-    };
+    const legend = (
+        <div className="mt-3 flex items-center gap-2 text-[11px] text-ink-3">
+            <span>−1 opposite</span>
+            <span className="flex overflow-hidden rounded">
+                {['bg-blue-700', 'bg-blue-300', 'bg-blue-100', 'bg-surface-2', 'bg-orange-100', 'bg-orange-300', 'bg-orange-600'].map(c => (
+                    <span key={c} className={`h-2.5 w-6 ${c}`} />
+                ))}
+            </span>
+            <span>+1 together</span>
+        </div>
+    );
 
     return (
-        <div className="mt-3 bg-white rounded-xl border border-gray-100 p-4 shadow-xs overflow-auto">
-            {title && <p className="text-xs font-bold text-gray-600 mb-3 uppercase tracking-wider">{title}</p>}
-            <table className="text-[10px]">
-                <thead>
-                    <tr>
-                        <th className="px-1 py-1"></th>
-                        {columns.map(c => (
-                            <th key={c} className="px-1 py-1 font-medium text-gray-500 max-w-[60px] truncate" title={c}>
-                                {c.slice(0, 8)}
-                            </th>
-                        ))}
-                    </tr>
-                </thead>
-                <tbody>
-                    {columns.map(row => (
-                        <tr key={row}>
-                            <td className="px-1 py-1 font-medium text-gray-500 max-w-[60px] truncate" title={row}>
-                                {row.slice(0, 8)}
-                            </td>
-                            {columns.map(col => (
-                                <td key={col} className="px-1 py-0.5">
-                                    <div className={`px-1.5 py-0.5 rounded-sm text-center font-mono font-bold ${getColor(data[row]?.[col] || 0)}`}>
-                                        {(data[row]?.[col] || 0).toFixed(2)}
-                                    </div>
-                                </td>
+        <ChartCard title={title} footer={legend}>
+            <div className="overflow-auto">
+                <table className="text-[11px]">
+                    <thead>
+                        <tr>
+                            <th />
+                            {columns.map(c => (
+                                <th key={c} className="max-w-18 truncate px-1 py-1 font-medium text-ink-3" title={c}>
+                                    {c.slice(0, 9)}
+                                </th>
                             ))}
                         </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
+                    </thead>
+                    <tbody>
+                        {columns.map(row => (
+                            <tr key={row}>
+                                <td className="max-w-22.5 truncate pr-2 text-right font-medium text-ink-3" title={row}>
+                                    {row}
+                                </td>
+                                {columns.map(col => {
+                                    const v = data[row]?.[col] ?? 0;
+                                    // A column against itself is always 1.00: show it, but keep it quiet
+                                    const isSelf = row === col;
+                                    return (
+                                        <td key={col} className="p-0.5">
+                                            <div
+                                                className={`rounded-md px-1.5 py-1 text-center font-mono font-semibold tabular-nums ${
+                                                    isSelf ? 'bg-surface text-ink-3/60 border border-dashed border-line' : correlationCell(v)
+                                                }`}
+                                                title={isSelf ? `${row} with itself` : `${row} × ${col}: ${v.toFixed(2)}`}
+                                            >
+                                                {isSelf ? '—' : v.toFixed(2)}
+                                            </div>
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </ChartCard>
     );
 }
 
-function ScatterPlot({ data, x, y, hue, title }) {
-    if (!data?.length) return null;
+/** Keep the largest groups as their own color; fold the rest into "Other". */
+function groupForColor(data, hue) {
+    const groups = new Map();
+    data.forEach(d => {
+        const key = String(d[hue]);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(d);
+    });
+    const sorted = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+    const kept = sorted.slice(0, GROUPS.length).map(([name, rows], i) => ({ name, rows, color: GROUPS[i] }));
+    const rest = sorted.slice(GROUPS.length).flatMap(([, rows]) => rows);
+    if (rest.length) kept.push({ name: 'Other', rows: rest, color: OTHER });
+    return kept;
+}
 
-    // Group by hue if provided
-    const groups = {};
-    if (hue) {
-        data.forEach(d => {
-            const key = String(d[hue]);
-            if (!groups[key]) groups[key] = [];
-            groups[key].push(d);
-        });
-    }
+function ScatterCard({ data, x, y, hue, title }) {
+    if (!data?.length) return null;
+    const groups = hue ? groupForColor(data, hue) : [];
 
     return (
-        <div className="mt-3 bg-white rounded-xl border border-gray-100 p-4 shadow-xs">
-            {title && <p className="text-xs font-bold text-gray-600 mb-3 uppercase tracking-wider">{title}</p>}
-            <ResponsiveContainer width="100%" height={280}>
-                <ScatterChart margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis dataKey={x} name={x} tick={{ fontSize: 10, fill: '#6b7280' }} />
-                    <YAxis dataKey={y} name={y} tick={{ fontSize: 10, fill: '#6b7280' }} />
-                    <Tooltip
-                        cursor={{ strokeDasharray: '3 3' }}
-                        contentStyle={{
-                            backgroundColor: '#1f2937',
-                            border: 'none',
-                            borderRadius: '8px',
-                            color: '#fff',
-                            fontSize: '11px',
-                        }}
-                    />
-                    {hue && Object.keys(groups).length > 0 ? (
+        <ChartCard title={title}>
+            <ResponsiveContainer width="100%" height={300}>
+                <ScatterChart margin={{ top: 4, right: 8, left: -12, bottom: 4 }}>
+                    <CartesianGrid stroke={GRID} />
+                    <XAxis dataKey={x} name={x} type="number" tick={axisTick} tickLine={false} axisLine={{ stroke: GRID }} />
+                    <YAxis dataKey={y} name={y} type="number" tick={axisTick} tickLine={false} axisLine={false} />
+                    <Tooltip cursor={{ strokeDasharray: '3 3', stroke: AXIS }} contentStyle={tooltipStyle} />
+                    {groups.length > 0 ? (
                         <>
-                            <Legend />
-                            {Object.entries(groups).map(([key, groupData], i) => (
-                                <Scatter key={key} name={key} data={groupData} fill={COLORS[i % COLORS.length]} />
+                            <Legend iconType="circle" wrapperStyle={{ fontSize: 12, color: '#57534e' }} />
+                            {groups.map(g => (
+                                <Scatter key={g.name} name={g.name} data={g.rows} fill={g.color} fillOpacity={0.8} />
                             ))}
                         </>
                     ) : (
-                        <Scatter data={data} fill="#6366f1" />
+                        <Scatter data={data} fill={SERIES} fillOpacity={0.75} />
                     )}
                 </ScatterChart>
             </ResponsiveContainer>
-        </div>
+        </ChartCard>
     );
 }

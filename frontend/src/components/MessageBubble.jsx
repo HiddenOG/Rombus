@@ -1,62 +1,56 @@
 import React from 'react';
-import { Sparkles } from 'lucide-react';
+import Markdown from 'react-markdown';
+import { CircleCheck } from 'lucide-react';
+import { Logo } from './Logo';
 import { EvidenceCard } from './EvidenceCard';
 import { ActionButton } from './ActionButton';
 
 /**
- * MessageBubble — individual chat message display.
+ * MessageBubble — one entry in the conversation.
  */
 export function MessageBubble({ message, onAction, isProcessing }) {
-    const isUser = message.role === 'user';
-    const isSystem = message.role === 'system';
-    const isAI = message.role === 'ai';
-
-    return (
-        <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-            <div
-                className={`max-w-[80%] p-4 ${isUser
-                    ? 'bg-linear-to-br from-indigo-600 to-indigo-700 text-white rounded-2xl rounded-tr-sm shadow-lg shadow-indigo-100'
-                    : isSystem
-                        ? 'bg-gray-100 text-gray-600 rounded-lg text-sm italic px-4 py-3'
-                        : 'bg-white border border-gray-200/80 shadow-xs rounded-2xl rounded-tl-sm'
-                    }`}
-            >
-                {/* AI role label */}
-                {isAI && (
-                    <div className="flex items-center gap-2 mb-2.5">
-                        <div className="w-6 h-6 bg-indigo-100 rounded-full flex items-center justify-center">
-                            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                        </div>
-                        <span className="text-xs font-bold uppercase tracking-widest text-indigo-500">
-                            Copilot
-                        </span>
-                    </div>
-                )}
-
-                {/* Message content */}
-                <div className="whitespace-pre-wrap text-base leading-relaxed">
+    if (message.role === 'user') {
+        return (
+            <div className="flex justify-end animate-in">
+                <div className="max-w-[75%] rounded-2xl rounded-br-md bg-brand-100 px-4 py-2.5 text-[15px] leading-relaxed text-ink">
                     {message.content}
                 </div>
+            </div>
+        );
+    }
 
-                {/* Evidence rendering */}
+    if (message.role === 'system') {
+        return (
+            <div className="flex justify-center animate-in">
+                <div className="flex max-w-[85%] items-start gap-2 rounded-full border border-line bg-surface px-3.5 py-1.5 text-xs text-ink-2">
+                    <CircleCheck className="w-3.5 h-3.5 mt-px shrink-0 text-emerald-600" />
+                    <span className="whitespace-pre-wrap">{message.content}</span>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex gap-3 animate-in">
+            <Logo size={30} className="mt-1 shrink-0" />
+            <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border border-line bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(28,25,23,0.04)]">
+                <div className="prose-chat text-[15px] leading-relaxed text-ink-2">
+                    <Markdown>{message.content}</Markdown>
+                </div>
+
                 {message.evidence && <EvidenceCard evidence={message.evidence} />}
 
-                {/* Suggested actions */}
                 {message.suggestions?.length > 0 && (
-                    <div className="mt-4 pt-3 border-t border-gray-100">
-                        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2.5">
-                            Suggested Actions
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                            {message.suggestions.map((action, j) => (
-                                <ActionButton
-                                    key={j}
-                                    action={action}
-                                    onExecute={onAction}
-                                    isProcessing={isProcessing}
-                                />
-                            ))}
-                        </div>
+                    <div className="mt-4 space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-ink-3">Suggested next steps</p>
+                        {message.suggestions.map((action, j) => (
+                            <ActionButton
+                                key={j}
+                                action={action}
+                                onExecute={onAction}
+                                isProcessing={isProcessing}
+                            />
+                        ))}
                     </div>
                 )}
             </div>
