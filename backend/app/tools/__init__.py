@@ -1,6 +1,6 @@
 """Tool registry — maps tool names to handler functions and their schemas."""
 
-from typing import Dict, Callable, Any, List, Optional
+from typing import Dict, Callable, Any, List, Optional, Set
 import pandas as pd
 from app.session import DataSession
 
@@ -11,12 +11,16 @@ TOOL_REGISTRY: Dict[str, Callable] = {}
 # JSON-schema specs for each tool, used to build Gemini function declarations
 TOOL_SPECS: Dict[str, Dict[str, Any]] = {}
 
+# Tools usable before the test rows are locked away (strict mode: no statistics, no changes)
+BEFORE_SPLIT_TOOLS: Set[str] = set()
+
 
 def register_tool(
     name: str,
     description: str,
     properties: Optional[Dict[str, Any]] = None,
     required: Optional[List[str]] = None,
+    before_split: bool = False,
 ):
     """Decorator to register a tool function along with its argument schema."""
     def decorator(func):
@@ -30,14 +34,31 @@ def register_tool(
                 "required": required or [],
             },
         }
+        if before_split:
+            BEFORE_SPLIT_TOOLS.add(name)
         return func
     return decorator
+
+
+def available_tools(session: DataSession) -> List[str]:
+    """Tools the session may use right now."""
+    return list(TOOL_REGISTRY) if session.is_split else [t for t in TOOL_REGISTRY if t in BEFORE_SPLIT_TOOLS]
 
 
 def execute_tool(tool_name: str, session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Execute a registered tool by name."""
     if tool_name not in TOOL_REGISTRY:
         return {"success": False, "message": f"Unknown tool: {tool_name}"}
+
+    if tool_name not in available_tools(session):
+        return {
+            "success": False,
+            "message": "Choose the target column first. That locks away the test rows; "
+                       "until then you can only preview a few rows.",
+        }
+
+    # An argument sent as null (LLMs often do this) means "not provided": let the tool use its default
+    args = {k: v for k, v in (args or {}).items() if v is not None}
 
     try:
         return TOOL_REGISTRY[tool_name](session, args)

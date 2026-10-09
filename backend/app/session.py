@@ -30,6 +30,9 @@ class DataSession:
         self.trained_models: Dict[str, Any] = {}
         self.scaler = None
         self.label_encoders: Dict[str, Any] = {}
+        # Final exam: rows locked away when the target is chosen, untouched until evaluation
+        self.test_df: Optional[pd.DataFrame] = None
+        self.test_size: Optional[float] = None
         self.created_at = time.time()
         self.updated_at = time.time()
         # Undo/rollback: snapshot stack of DataFrame states
@@ -58,14 +61,49 @@ class DataSession:
     def undo_count(self) -> int:
         return len(self._snapshots)
 
+    @property
+    def is_split(self) -> bool:
+        return self.test_df is not None
+
+    def lock_test_rows(self, test_size: float) -> int:
+        """Set aside test rows from the original data; self.df becomes the training rows.
+
+        Rows with a blank target are dropped first (they can't be learned from or graded).
+        Classification splits are stratified when every class has enough rows.
+        Returns the number of rows dropped for a blank target.
+        """
+        from sklearn.model_selection import train_test_split
+
+        full = self.original_df.dropna(subset=[self.target_column])
+        dropped = len(self.original_df) - len(full)
+        y = full[self.target_column]
+
+        stratify = None
+        if self.problem_type == "classification":
+            counts = y.value_counts()
+            n_test = int(np.ceil(len(full) * test_size))
+            if counts.min() >= 2 and n_test >= len(counts):
+                stratify = y
+
+        train, test = train_test_split(full, test_size=test_size, random_state=42, stratify=stratify)
+        self.df = train.reset_index(drop=True)
+        self.test_df = test.reset_index(drop=True)
+        self.test_size = test_size
+        return dropped
+
     def compute_column_evidence(self, col: str) -> Dict[str, Any]:
-        """Compute statistical evidence for a single column."""
+        """Compute statistical evidence for a single column.
+
+        Before the test rows are locked away, only the name and type are revealed:
+        statistics would let test rows influence decisions.
+        """
         if col not in self.df.columns:
             return {}
         series = self.df[col]
-        evidence = {
-            "name": col,
-            "dtype": str(series.dtype),
+        evidence = {"name": col, "dtype": str(series.dtype)}
+        if not self.is_split:
+            return evidence
+        evidence |= {
             "missing_ratio": float(series.isnull().mean()),
             "unique_count": int(series.nunique()),
         }
@@ -95,6 +133,9 @@ class DataSession:
             "target": self.target_column,
             "problem_type": self.problem_type,
             "has_split": self.X_train is not None,
+            "is_split": self.is_split,
+            "test_rows": len(self.test_df) if self.is_split else 0,
+            "test_size": self.test_size,
             "completed_steps": self.completed_steps,
             "can_undo": self.can_undo,
             "undo_count": self.undo_count,
@@ -108,8 +149,9 @@ class DataSession:
         for col in self.df.columns:
             ev = self.compute_column_evidence(col)
             parts = [f"{ev['name']} ({ev['dtype']})"]
-            parts.append(f"miss={ev['missing_ratio']:.1%}")
-            parts.append(f"uniq={ev['unique_count']}")
+            if "missing_ratio" in ev:
+                parts.append(f"miss={ev['missing_ratio']:.1%}")
+                parts.append(f"uniq={ev['unique_count']}")
             if "mean" in ev:
                 parts.append(f"mean={ev['mean']}")
             if "skewness" in ev:
@@ -148,6 +190,10 @@ class SessionManager:
                     updated_at REAL
                 )
             """)
+            # Columns added after the first release
+            existing = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+            if "test_size" not in existing:
+                conn.execute("ALTER TABLE sessions ADD COLUMN test_size REAL")
 
     def create_session(self, df: pd.DataFrame, filename: str) -> DataSession:
         """Create a new session and persist it."""
@@ -183,13 +229,20 @@ class SessionManager:
         original_path = os.path.join(settings.DATA_DIR, f"{session.session_id}_original.parquet")
         session.original_df.to_parquet(original_path, index=False)
 
+        # Save locked test rows
+        test_path = os.path.join(settings.DATA_DIR, f"{session.session_id}_test.parquet")
+        if session.is_split:
+            session.test_df.to_parquet(test_path, index=False)
+        elif os.path.exists(test_path):
+            os.remove(test_path)
+
         # Save metadata to SQLite
         with sqlite3.connect(self._db_path) as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO sessions
                 (session_id, filename, current_stage, target_column, problem_type,
-                 completed_steps, memory, workflow_log, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 completed_steps, memory, workflow_log, created_at, updated_at, test_size)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 session.session_id,
                 session.filename,
@@ -201,6 +254,7 @@ class SessionManager:
                 json.dumps(session.workflow_log[-50:]),
                 session.created_at,
                 session.updated_at,
+                session.test_size,
             ))
 
     def _load_session(self, session_id: str) -> Optional[DataSession]:
@@ -240,6 +294,12 @@ class SessionManager:
             if os.path.exists(original_path):
                 session.original_df = pd.read_parquet(original_path)
 
+            # Load locked test rows if the split happened
+            test_path = os.path.join(settings.DATA_DIR, f"{session_id}_test.parquet")
+            if os.path.exists(test_path):
+                session.test_df = pd.read_parquet(test_path)
+                session.test_size = row["test_size"]
+
             return session
         except Exception:
             return None
@@ -263,7 +323,7 @@ class SessionManager:
         self._sessions.pop(session_id, None)
 
         # Remove parquet files
-        for suffix in ["", "_original"]:
+        for suffix in ["", "_original", "_test"]:
             path = os.path.join(settings.DATA_DIR, f"{session_id}{suffix}.parquet")
             if os.path.exists(path):
                 os.remove(path)

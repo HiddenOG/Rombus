@@ -6,11 +6,11 @@ frontend as suggested actions, which the user clicks to run through /api/action.
 
 import copy
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.config import settings
 from app.session import DataSession
-from app.tools import TOOL_REGISTRY, TOOL_SPECS
+from app.tools import TOOL_REGISTRY, TOOL_SPECS, available_tools
 from app.workflow_context import ASEMIC_WORKFLOW, IRIS_CASE_STUDY
 
 logger = logging.getLogger(__name__)
@@ -29,10 +29,14 @@ def _get_client():
     return _client
 
 
-def build_tool_declarations() -> List[Dict[str, Any]]:
-    """Turn the tool registry into function declarations, each with a required 'explanation'."""
+def build_tool_declarations(session: Optional[DataSession] = None) -> List[Dict[str, Any]]:
+    """Turn the tool registry into function declarations, each with a required 'explanation'.
+
+    With a session, only the tools it may use right now are declared.
+    """
+    names = available_tools(session) if session else list(TOOL_SPECS)
     declarations = []
-    for spec in TOOL_SPECS.values():
+    for spec in (TOOL_SPECS[n] for n in names):
         params = copy.deepcopy(spec["parameters"])
         params["properties"]["explanation"] = {
             "type": "string",
@@ -50,6 +54,17 @@ def build_tool_declarations() -> List[Dict[str, Any]]:
 def build_system_instruction(session: DataSession) -> str:
     """Static guidance plus a snapshot of the current session state."""
     state = session.get_summary()
+    if state["is_split"]:
+        split_status = (
+            f"LOCKED: {state['test_rows']} rows ({state['test_size']:.0%}) are set aside as the final test set. "
+            "Everything you see is the training rows only."
+        )
+    else:
+        split_status = (
+            "NOT YET LOCKED. Strict mode: only column names and types are visible, and only previewing and "
+            "choosing the target are possible. Help the user pick the column to predict, and ask what "
+            "percentage of rows to lock away as the final test set (default 20%, usually 10-30%)."
+        )
     return f"""
 You are an expert Data Science Copilot following the ASEMIC workflow.
 
@@ -61,7 +76,8 @@ CASE STUDY REFERENCE:
 
 CURRENT ASEMIC STAGE: {state['stage']}
 DATASET: {state['filename']} ({state['shape'][0]} rows × {state['shape'][1]} columns)
-TARGET: {state['target']} | PROBLEM: {state['problem_type']} | SPLIT: {state['has_split']}
+TARGET: {state['target']} | PROBLEM: {state['problem_type']}
+TEST ROWS: {split_status}
 TRAINED MODELS: {', '.join(state['trained_models']) or 'None'}
 CAN UNDO: {state['can_undo']} ({state['undo_count']} snapshots)
 COMPLETED STEPS: {', '.join(state['completed_steps'][-10:]) or 'None'}
@@ -129,7 +145,7 @@ async def get_copilot_response(session: DataSession, user_message: str) -> dict:
             contents=build_contents(session, user_message),
             config={
                 "system_instruction": build_system_instruction(session),
-                "tools": [{"function_declarations": build_tool_declarations()}],
+                "tools": [{"function_declarations": build_tool_declarations(session)}],
                 "automatic_function_calling": {"disable": True},
             },
         )

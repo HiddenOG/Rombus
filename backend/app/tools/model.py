@@ -85,7 +85,8 @@ ALGORITHM = {
 
 @register_tool(
     "train_test_split",
-    "Split the data into train and test sets. Requires a target column.",
+    "Practice split: divide the training rows into a part to learn from and a part to check against. "
+    "The locked test rows are not used.",
     {
         "test_size": {"type": "number", "description": "Fraction for the test set (default 0.2)."},
         "stratify": {"type": "boolean", "description": "Stratify by target (classification only)."},
@@ -118,7 +119,12 @@ def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str,
         X, y, test_size=test_size, random_state=42, stratify=stratify_param
     )
 
-    msg = f"Data split: {len(session.X_train)} train, {len(session.X_test)} test rows (test_size={test_size})."
+    # TODO(piece 3): evaluate on the locked test rows instead of this practice split
+    msg = (
+        f"Practice split of the training rows: {len(session.X_train)} to learn from, "
+        f"{len(session.X_test)} to check against (test_size={test_size}). "
+        f"The {len(session.test_df) if session.is_split else 0} locked test rows stay untouched."
+    )
     if object_cols:
         msg += f" Auto-encoded {len(object_cols)} categorical columns: {object_cols}."
 

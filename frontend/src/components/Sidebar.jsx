@@ -56,7 +56,18 @@ export function Sidebar({ sessionId, currentStage, summary, onFileUpload, isProc
                             </h3>
                             <div className="bg-gray-50 rounded-xl p-3 space-y-2 text-sm">
                                 <DataRow label="File" value={summary?.filename} />
-                                <DataRow label="Rows" value={summary?.shape?.[0]?.toLocaleString()} mono />
+                                <DataRow
+                                    label={summary?.is_split ? 'Training rows' : 'Rows'}
+                                    value={summary?.shape?.[0]?.toLocaleString()}
+                                    mono
+                                />
+                                {summary?.is_split && (
+                                    <DataRow
+                                        label="Locked test rows"
+                                        value={`${summary.test_rows.toLocaleString()} (${Math.round(summary.test_size * 100)}%)`}
+                                        mono
+                                    />
+                                )}
                                 <DataRow label="Columns" value={summary?.shape?.[1]} mono />
                                 <DataRow
                                     label="Target"
@@ -88,6 +99,11 @@ export function Sidebar({ sessionId, currentStage, summary, onFileUpload, isProc
                             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
                                 <Layers className="w-3.5 h-3.5" /> Columns ({summary?.columns?.length})
                             </h3>
+                            {!summary?.is_split && (
+                                <p className="text-xs text-gray-500 mb-2">
+                                    Statistics are hidden until you choose the column to predict and lock away the test rows.
+                                </p>
+                            )}
                             <div className="space-y-2">
                                 {summary?.columns?.map(col => (
                                     <ColumnCard key={col.name} col={col} />
@@ -131,7 +147,7 @@ function ColumnCard({ col }) {
                     {col.dtype}
                 </span>
             </div>
-            <div className="grid grid-cols-2 gap-1 text-xs text-gray-500">
+            {col.missing_ratio != null && <div className="grid grid-cols-2 gap-1 text-xs text-gray-500">
                 <span className={hasMissing ? 'text-red-500 font-medium' : ''}>
                     Missing: {missingPct}%
                 </span>
@@ -144,7 +160,7 @@ function ColumnCard({ col }) {
                 {col.mean != null && (
                     <span>Mean: {col.mean.toFixed(2)}</span>
                 )}
-            </div>
+            </div>}
             {/* Missing bar */}
             {hasMissing && (
                 <div className="mt-1.5 h-1.5 bg-gray-100 rounded-full overflow-hidden">
