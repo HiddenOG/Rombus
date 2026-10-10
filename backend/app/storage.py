@@ -39,6 +39,7 @@ sessions_table = Table(
     Column("lock_count", Integer),
     Column("cells", Text),
     Column("exam_count", Integer),
+    Column("owner", String(64)),
 )
 
 
@@ -74,12 +75,20 @@ class Database:
             row = conn.execute(select(sessions_table).where(sessions_table.c.session_id == session_id)).mappings().first()
         return dict(row) if row else None
 
-    def recent(self, limit: int) -> List[Dict[str, Any]]:
+    def recent(self, limit: int, owner: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Most recent notebooks of `owner`, plus unowned ones from before owners existed."""
         t = sessions_table
         query = (select(t.c.session_id, t.c.filename, t.c.target_column, t.c.current_stage, t.c.updated_at)
                  .order_by(t.c.updated_at.desc()).limit(limit))
+        if owner is not None:
+            query = query.where((t.c.owner == owner) | (t.c.owner.is_(None)))
         with self.engine.connect() as conn:
             return [dict(r) for r in conn.execute(query).mappings()]
+
+    def older_than(self, cutoff: float) -> List[str]:
+        t = sessions_table
+        with self.engine.connect() as conn:
+            return [r[0] for r in conn.execute(select(t.c.session_id).where(t.c.updated_at < cutoff))]
 
     def delete(self, session_id: str) -> None:
         with self.engine.begin() as conn:

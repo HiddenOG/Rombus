@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict
 
 import numpy as np
 
+from app.config import settings
 from app.session import DataSession
 
 Builder = Callable[[DataSession, Dict[str, Any]], str]
@@ -315,7 +316,14 @@ def models_template(session: DataSession, algorithms) -> str:
 
 def code_info(session: DataSession, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """The code for a cell, and whether / how it can be edited."""
-    args = args or {}
+    info = _code_info(session, tool, args or {})
+    if not settings.ALLOW_CUSTOM_CODE and info["custom_tool"]:
+        info.update(custom_tool=None, template=None,
+                    protected="Editing code is switched off on this server (it would let visitors run code here).")
+    return info
+
+
+def _code_info(session: DataSession, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
     if tool in ("custom_view", "custom_models"):
         code = args.get("code", "")
         return {"code": code, "custom_tool": tool, "template": code, "protected": None}

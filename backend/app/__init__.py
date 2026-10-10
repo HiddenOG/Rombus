@@ -1,17 +1,42 @@
+import asyncio
+import contextlib
+import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from app.config import settings
 from app.routers import upload, chat, action, health, recipe
 from app.session import session_manager
+
+logger = logging.getLogger(__name__)
+
+CLEANUP_EVERY_SECONDS = 3600
+
+
+async def _cleanup_loop():
+    """Delete old notebooks every hour (only when SESSION_TTL_HOURS is set)."""
+    while True:
+        try:
+            removed = session_manager.cleanup_expired()
+            if removed:
+                logger.info("Cleaned up %d old notebooks", removed)
+        except Exception:
+            logger.exception("Notebook cleanup failed")
+        await asyncio.sleep(CLEANUP_EVERY_SECONDS)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     session_manager.initialize()
+    cleanup = asyncio.create_task(_cleanup_loop()) if settings.SESSION_TTL_HOURS > 0 else None
     yield
-    session_manager.cleanup_expired()
+    if cleanup:
+        cleanup.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cleanup
 
 
 def create_app() -> FastAPI:
@@ -22,14 +47,15 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS
-    origins = [o.strip() for o in settings.CORS_ORIGINS.split(",")]
+    # CORS: only the configured sites may call the API. No cookies are used (visitors are
+    # identified by the X-Visitor-Id header), so credentials stay off.
+    origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["Content-Type", "X-Visitor-Id"],
     )
 
     # Include routers
@@ -43,4 +69,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

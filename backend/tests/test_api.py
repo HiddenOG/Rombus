@@ -26,7 +26,7 @@ def client(tmp_path, monkeypatch):
         }
 
     monkeypatch.setattr("app.routers.chat.get_copilot_response", fake_copilot)
-    with TestClient(app) as c:
+    with TestClient(app, headers={"X-Visitor-Id": "test-visitor-0000000001"}) as c:
         yield c
 
 

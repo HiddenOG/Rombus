@@ -111,7 +111,7 @@ class TestRecipeAPI:
     @pytest.fixture
     def client(self, tmp_path, monkeypatch):
         monkeypatch.setattr(settings, "DATA_DIR", str(tmp_path))
-        with TestClient(app) as c:
+        with TestClient(app, headers={"X-Visitor-Id": "test-visitor-0000000001"}) as c:
             yield c
 
     def test_list_edit_delete(self, client):

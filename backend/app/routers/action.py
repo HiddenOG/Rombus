@@ -1,8 +1,8 @@
 """Action router — tool execution endpoint."""
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 
-from app.auth import verify_api_key
+from app.access import owned_session, visitor_id
 from app.models import ActionRequest, ActionResponse
 from app.session import session_manager
 from app.tools import execute_tool
@@ -11,14 +11,9 @@ router = APIRouter()
 
 
 @router.post("/action", response_model=ActionResponse)
-async def execute_action(
-    request: ActionRequest,
-    _: str = Depends(verify_api_key),
-):
+async def execute_action(request: ActionRequest, visitor: str = Depends(visitor_id)):
     """Execute a data science tool/action."""
-    session = session_manager.get_session(request.session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+    session = owned_session(request.session_id, visitor)
 
     # Execute the tool
     session.models_cleared = False

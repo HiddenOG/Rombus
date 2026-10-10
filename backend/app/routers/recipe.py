@@ -5,7 +5,8 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.auth import verify_api_key
+from app.access import owned_session, visitor_id
+from app.config import settings
 from app.session import DataSession, session_manager
 from app.tools import BEFORE_SPLIT_TOOLS, TOOL_KINDS, TOOL_SPECS
 
@@ -15,12 +16,6 @@ router = APIRouter()
 class StepUpdate(BaseModel):
     args: Dict[str, Any]
 
-
-def _session(session_id: str) -> DataSession:
-    session = session_manager.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
-    return session
 
 
 def _respond(session: DataSession, message: str) -> Dict[str, Any]:
@@ -37,13 +32,14 @@ async def list_tools():
         "tools": [
             {**spec, "kind": TOOL_KINDS[name], "before_split": name in BEFORE_SPLIT_TOOLS}
             for name, spec in TOOL_SPECS.items()
+            if settings.ALLOW_CUSTOM_CODE or not name.startswith("custom_")
         ]
     }
 
 
 @router.get("/sessions")
-async def list_sessions(_: str = Depends(verify_api_key)):
-    return {"sessions": session_manager.list_sessions()}
+async def list_sessions(visitor: str = Depends(visitor_id)):
+    return {"sessions": session_manager.list_sessions(owner=visitor)}
 
 
 class CellsUpdate(BaseModel):
@@ -51,34 +47,34 @@ class CellsUpdate(BaseModel):
 
 
 @router.get("/session/{session_id}/cells")
-async def get_cells(session_id: str, _: str = Depends(verify_api_key)):
-    return {"cells": _session(session_id).cells}
+async def get_cells(session_id: str, visitor: str = Depends(visitor_id)):
+    return {"cells": owned_session(session_id, visitor).cells}
 
 
 @router.put("/session/{session_id}/cells")
-async def save_cells(session_id: str, body: CellsUpdate, _: str = Depends(verify_api_key)):
+async def save_cells(session_id: str, body: CellsUpdate, visitor: str = Depends(visitor_id)):
     """The notebook's cells, saved with the notebook so any browser can reopen it."""
-    session = _session(session_id)
+    session = owned_session(session_id, visitor)
     session.cells = body.cells
     session_manager.save(session)
     return {"success": True}
 
 
 @router.delete("/session/{session_id}")
-async def delete_notebook(session_id: str, _: str = Depends(verify_api_key)):
-    _session(session_id)  # 404 if it doesn't exist
+async def delete_notebook(session_id: str, visitor: str = Depends(visitor_id)):
+    owned_session(session_id, visitor)  # 404 unless it exists and belongs to this visitor
     session_manager.delete_session(session_id)
     return {"success": True}
 
 
 @router.get("/session/{session_id}/recipe")
-async def get_recipe(session_id: str, _: str = Depends(verify_api_key)):
-    return {"recipe": _session(session_id).recipe_view()}
+async def get_recipe(session_id: str, visitor: str = Depends(visitor_id)):
+    return {"recipe": owned_session(session_id, visitor).recipe_view()}
 
 
 @router.put("/session/{session_id}/recipe/{step_id}")
-async def update_step(session_id: str, step_id: str, body: StepUpdate, _: str = Depends(verify_api_key)):
-    session = _session(session_id)
+async def update_step(session_id: str, step_id: str, body: StepUpdate, visitor: str = Depends(visitor_id)):
+    session = owned_session(session_id, visitor)
     try:
         line = session.update_step(step_id, body.args)
     except ValueError as e:
@@ -92,10 +88,10 @@ class CodeRequest(BaseModel):
 
 
 @router.post("/session/{session_id}/code")
-async def show_code(session_id: str, body: CodeRequest, _: str = Depends(verify_api_key)):
+async def show_code(session_id: str, body: CodeRequest, visitor: str = Depends(visitor_id)):
     """Code for an action or view cell, and whether it can be edited (recipe steps carry their own code)."""
     from app.action_code import code_info
-    return code_info(_session(session_id), body.tool, body.args)
+    return code_info(owned_session(session_id, visitor), body.tool, body.args)
 
 
 class CodeUpdate(BaseModel):
@@ -103,9 +99,9 @@ class CodeUpdate(BaseModel):
 
 
 @router.put("/session/{session_id}/recipe/{step_id}/code")
-async def update_step_code(session_id: str, step_id: str, body: CodeUpdate, _: str = Depends(verify_api_key)):
+async def update_step_code(session_id: str, step_id: str, body: CodeUpdate, visitor: str = Depends(visitor_id)):
     """Save edited code for a step. A built-in step becomes a custom code step (and remembers what it was)."""
-    session = _session(session_id)
+    session = owned_session(session_id, visitor)
     try:
         current = session.recipe[session.index_of(step_id)]
         based_on = current.args.get("based_on") if current.tool == "custom_code" else {"tool": current.tool, "args": current.args}
@@ -117,9 +113,9 @@ async def update_step_code(session_id: str, step_id: str, body: CodeUpdate, _: s
 
 
 @router.post("/session/{session_id}/recipe/{step_id}/revert")
-async def revert_step(session_id: str, step_id: str, _: str = Depends(verify_api_key)):
+async def revert_step(session_id: str, step_id: str, visitor: str = Depends(visitor_id)):
     """Turn a custom code step back into the built-in step it started from."""
-    session = _session(session_id)
+    session = owned_session(session_id, visitor)
     try:
         current = session.recipe[session.index_of(step_id)]
         based_on = current.args.get("based_on")
@@ -136,8 +132,8 @@ class Move(BaseModel):
 
 
 @router.post("/session/{session_id}/recipe/{step_id}/move")
-async def move_step(session_id: str, step_id: str, body: Move, _: str = Depends(verify_api_key)):
-    session = _session(session_id)
+async def move_step(session_id: str, step_id: str, body: Move, visitor: str = Depends(visitor_id)):
+    session = owned_session(session_id, visitor)
     try:
         line = session.move_step(step_id, body.direction)
     except ValueError as e:
@@ -147,9 +143,9 @@ async def move_step(session_id: str, step_id: str, body: Move, _: str = Depends(
 
 
 @router.post("/session/{session_id}/restart")
-async def restart(session_id: str, _: str = Depends(verify_api_key)):
+async def restart(session_id: str, visitor: str = Depends(visitor_id)):
     """Restart, Jupyter-style: clear trained models and the AI's memory; rebuild the data from scratch."""
-    session = _session(session_id)
+    session = owned_session(session_id, visitor)
     session.restart()
     session_manager.save(session)
     return {
@@ -161,8 +157,8 @@ async def restart(session_id: str, _: str = Depends(verify_api_key)):
 
 
 @router.delete("/session/{session_id}/recipe/{step_id}")
-async def delete_step(session_id: str, step_id: str, _: str = Depends(verify_api_key)):
-    session = _session(session_id)
+async def delete_step(session_id: str, step_id: str, visitor: str = Depends(visitor_id)):
+    session = owned_session(session_id, visitor)
     try:
         removed = session.delete_step(step_id)
     except ValueError as e:

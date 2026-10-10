@@ -3,7 +3,26 @@
  */
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const API_KEY = import.meta.env.VITE_API_KEY || '';
+
+/**
+ * This browser's visitor id: random and unguessable, made once and kept in localStorage.
+ * The server only shows a notebook to the visitor who created it.
+ */
+function visitorId() {
+    const KEY = 'automl.visitor';
+    try {
+        let id = localStorage.getItem(KEY);
+        if (!id) {
+            id = (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, '');
+            localStorage.setItem(KEY, id);
+        }
+        return id;
+    } catch {
+        // Storage blocked (private mode): a per-tab id still works until the tab closes
+        visitorId.fallback ||= crypto.randomUUID?.().replace(/-/g, '') || `${Date.now()}${Math.random().toString(36).slice(2)}`;
+        return visitorId.fallback;
+    }
+}
 
 /**
  * Make an API request with standard error handling.
@@ -12,11 +31,8 @@ async function apiRequest(endpoint, options = {}) {
     const url = `${API_URL}${endpoint}`;
     const headers = {
         ...options.headers,
+        'X-Visitor-Id': visitorId(),
     };
-
-    if (API_KEY) {
-        headers['X-API-Key'] = API_KEY;
-    }
 
     // Don't set Content-Type for FormData (browser sets it with boundary)
     if (!(options.body instanceof FormData)) {
@@ -81,6 +97,10 @@ export async function deleteNotebook(sessionId) {
 
 export async function listSessions() {
     return apiRequest('/api/sessions', { method: 'GET' });
+}
+
+export async function getConfig() {
+    return apiRequest('/api/config', { method: 'GET' });
 }
 
 export async function getTools() {

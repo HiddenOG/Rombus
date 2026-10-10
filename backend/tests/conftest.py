@@ -22,3 +22,14 @@ def no_real_ai(monkeypatch):
     monkeypatch.setattr(settings, "GOOGLE_API_KEY", "")
     monkeypatch.setattr(settings, "GROQ_API_KEY", "")
     monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "")
+    # Usage limits are tested on their own (test_access.py); elsewhere they'd only get in the way
+    monkeypatch.setattr(settings, "RATE_LIMITS", False)
+    monkeypatch.setattr(settings, "SESSION_TTL_HOURS", 0)
+
+
+VISITOR = "test-visitor-0000000001"
+
+
+@pytest.fixture
+def visitor_headers():
+    return {"X-Visitor-Id": VISITOR}

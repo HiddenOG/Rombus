@@ -41,6 +41,8 @@ export function useNotebook() {
     const [summary, setSummary] = useState(null);
     const [cells, setCells] = useState([]);
     const [tools, setTools] = useState({});
+    // What this server allows (e.g. custom code is off on a public deployment)
+    const [config, setConfig] = useState({ custom_code: false });
     const [notebooks, setNotebooks] = useState([]);
     const [isProcessing, setIsProcessing] = useState(false);
     const [error, setError] = useState(null);
@@ -89,8 +91,9 @@ export function useNotebook() {
     useEffect(() => {
         (async () => {
             try {
-                const { tools: list } = await api.getTools();
+                const [{ tools: list }, serverConfig] = await Promise.all([api.getTools(), api.getConfig()]);
                 setTools(Object.fromEntries(list.map(t => [t.name, t])));
+                setConfig(serverConfig);
             } catch (err) {
                 setError(err.message);
             }
@@ -338,6 +341,7 @@ export function useNotebook() {
         summary,
         cells,
         tools,
+        config,
         notebooks,
         isProcessing,
         error,

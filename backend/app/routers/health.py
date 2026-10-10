@@ -1,10 +1,11 @@
-"""Health and session recovery router."""
+"""Health, public settings, and notebook recovery."""
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 
-from app.auth import verify_api_key
+from app.access import owned_session
+from app.config import settings
 from app.models import HealthResponse
-from app.session import session_manager
+from app.session import DataSession, session_manager
 
 router = APIRouter()
 
@@ -19,16 +20,19 @@ async def health_check():
     )
 
 
-@router.get("/session/{session_id}")
-async def get_session(
-    session_id: str,
-    _: str = Depends(verify_api_key),
-):
-    """Recover a session by ID (e.g., after page refresh)."""
-    session = session_manager.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found or expired.")
+@router.get("/config")
+async def public_config():
+    """What this server allows, so the interface only offers what works here."""
+    return {
+        "custom_code": settings.ALLOW_CUSTOM_CODE,
+        "max_upload_mb": settings.MAX_UPLOAD_SIZE_MB,
+        "max_rows": settings.MAX_ROWS,
+    }
 
+
+@router.get("/session/{session_id}")
+async def get_session(session: DataSession = Depends(owned_session)):
+    """Recover a notebook by id (e.g. after a page refresh)."""
     return {
         "session_id": session.session_id,
         "current_stage": session.current_stage,

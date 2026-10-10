@@ -52,6 +52,8 @@ class DataSession:
         self.cells: List[Dict[str, Any]] = []
         # How many times the locked test rows were used for the final exam (each extra look erodes trust)
         self.exam_count = 0
+        # The visitor who created this notebook; only they can see or change it
+        self.owner: Optional[str] = None
         self.created_at = time.time()
         self.updated_at = time.time()
 
@@ -360,9 +362,10 @@ class SessionManager:
         self._db = Database(database_url())
         self._files = LocalFileStore(settings.DATA_DIR)
 
-    def create_session(self, df: pd.DataFrame, filename: str) -> DataSession:
+    def create_session(self, df: pd.DataFrame, filename: str, owner: Optional[str] = None) -> DataSession:
         """Create a new session and persist it."""
         session = DataSession(df, filename)
+        session.owner = owner
         self._sessions[session.session_id] = session
         self._persist_session(session)
         return session
@@ -413,6 +416,7 @@ class SessionManager:
             "lock_count": session.lock_count,
             "cells": json.dumps(session.cells, default=str),
             "exam_count": session.exam_count,
+            "owner": session.owner,
         })
 
     def _load_session(self, session_id: str) -> Optional[DataSession]:
@@ -437,6 +441,7 @@ class SessionManager:
             session.lock_count = row["lock_count"] or 0
             session.cells = json.loads(row["cells"] or "[]")
             session.exam_count = row["exam_count"] or 0
+            session.owner = row["owner"]
 
             # Rebuild the training rows: raw training rows + replayed recipe (restores sticky notes too)
             train, test = self._files.load(f"{session_id}_train"), self._files.load(f"{session_id}_test")
@@ -457,22 +462,27 @@ class SessionManager:
         """Explicitly save a session."""
         self._persist_session(session)
 
-    def list_sessions(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Most recently used sessions, for the notebook list."""
+    def list_sessions(self, limit: int = 20, owner: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Most recently used sessions of `owner`, for the notebook list."""
         if not self._db:
             return []
         return [
             {"session_id": r["session_id"], "filename": r["filename"], "target": r["target_column"],
              "stage": r["current_stage"], "updated_at": r["updated_at"]}
-            for r in self._db.recent(limit)
+            for r in self._db.recent(limit, owner)
         ]
 
-    def cleanup_expired(self):
-        """Remove sessions older than TTL."""
+    def cleanup_expired(self) -> int:
+        """Delete notebooks (memory, files and records) unused for longer than SESSION_TTL_HOURS."""
+        if settings.SESSION_TTL_HOURS <= 0:
+            return 0
         cutoff = time.time() - (settings.SESSION_TTL_HOURS * 3600)
-        expired = [sid for sid, s in self._sessions.items() if s.updated_at < cutoff]
+        expired = set(sid for sid, s in self._sessions.items() if s.updated_at < cutoff)
+        if self._db:
+            expired |= set(self._db.older_than(cutoff))
         for sid in expired:
             self.delete_session(sid)
+        return len(expired)
 
     def delete_session(self, session_id: str):
         """Remove a notebook everywhere: memory, data files and its database record."""

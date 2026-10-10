@@ -86,7 +86,7 @@ export function AskCell({ cell, number, onRun, isProcessing }) {
     );
 }
 
-export function RunCell({ cell, number, tool, step, summary, sessionId, isProcessing, onEdit, onEditCode, onRevert, onCustomize, onRevertAction, onEditAction, onMove, onCopy, onDelete, onRerun }) {
+export function RunCell({ cell, number, tool, step, summary, sessionId, isProcessing, customCodeAllowed = true, onEdit, onEditCode, onRevert, onCustomize, onRevertAction, onEditAction, onMove, onCopy, onDelete, onRerun }) {
     const [editing, setEditing] = useState(false);
     const [tab, setTab] = useState('result');
     const [editingCode, setEditingCode] = useState(false);
@@ -341,7 +341,7 @@ export function RunCell({ cell, number, tool, step, summary, sessionId, isProces
                                         <span className="font-mono text-ink-2">learn()</span> looks at the training rows once;{' '}
                                         <span className="font-mono text-ink-2">apply()</span> uses what it learned on training rows, the test set and new customers.
                                     </p>
-                                    {!removed && (
+                                    {!removed && customCodeAllowed && (
                                         <button
                                             onClick={() => setEditingCode(true)}
                                             disabled={isProcessing}

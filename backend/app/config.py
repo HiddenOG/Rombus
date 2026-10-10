@@ -53,17 +53,24 @@ class Settings(BaseSettings):
     # like a Jupyter cell: fine on your own laptop, but MUST be false on any shared/public server.
     ALLOW_CUSTOM_CODE: bool = True
 
-    # API Authentication (optional — empty string disables auth)
-    API_SECRET_KEY: str = ""
+    # CORS: the sites allowed to call this API (comma-separated). Set to your real site when deployed.
+    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
 
-    # CORS
-    CORS_ORIGINS: str = "*"
+    # Usage limits (protect free AI allowances and the server)
+    RATE_LIMITS: bool = True
+    AI_PER_MINUTE: int = 10          # copilot messages per visitor per minute
+    AI_DAILY_LIMIT: int = 500        # copilot messages per day, all visitors together
+    UPLOADS_PER_HOUR: int = 20       # uploads per visitor per hour
 
     # Upload limits
-    MAX_UPLOAD_SIZE_MB: int = 50
+    MAX_UPLOAD_SIZE_MB: int = 20
+    MAX_ROWS: int = 200_000
+    MAX_COLUMNS: int = 200
 
     # Session management
-    SESSION_TTL_HOURS: int = 24
+    # Delete notebooks unused for this many hours (0 = keep forever, the right choice on your own laptop;
+    # a public demo should set e.g. 72 so its disk doesn't fill up)
+    SESSION_TTL_HOURS: int = 0
 
     # Database. Empty = a local SQLite file in DATA_DIR (private, offline).
     # A PostgreSQL URL (e.g. from Supabase) works without code changes.

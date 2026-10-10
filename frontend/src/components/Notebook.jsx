@@ -70,6 +70,7 @@ export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
                                 summary={summary}
                                 sessionId={sessionId}
                                 isProcessing={isProcessing}
+                                customCodeAllowed={nb.config.custom_code}
                                 onEdit={nb.editStep}
                                 onEditCode={nb.editCode}
                                 onRevert={nb.revertCell}
