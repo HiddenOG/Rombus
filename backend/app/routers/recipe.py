@@ -67,6 +67,27 @@ async def delete_notebook(session_id: str, visitor: str = Depends(visitor_id)):
     return {"success": True}
 
 
+@router.get("/session/{session_id}/export")
+async def export(session_id: str, what: str = "train", format: str = "csv", visitor: str = Depends(visitor_id)):
+    """Download cleaned data (what=train|all, format=csv|xlsx) or the pipeline (what=script)."""
+    import re
+    from fastapi.responses import Response
+    from app.export import cleaned_rows, pipeline_script, to_file
+
+    session = owned_session(session_id, visitor)
+    stem = re.sub(r"[^A-Za-z0-9_-]", "_", session.filename.rsplit(".", 1)[0]) or "notebook"
+    if what == "script":
+        if not session.is_split:
+            raise HTTPException(status_code=400, detail="Choose the target first: the pipeline starts with the lock.")
+        body, media, name = pipeline_script(session).encode("utf-8"), "text/x-python", f"{stem}_pipeline.py"
+    elif what in ("train", "all") and format in ("csv", "xlsx"):
+        body, media = to_file(cleaned_rows(session, what), format)
+        name = f"{stem}_{'train_clean' if what == 'train' else 'all_clean'}.{format}"
+    else:
+        raise HTTPException(status_code=400, detail="Export what=train|all|script, format=csv|xlsx.")
+    return Response(body, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @router.get("/session/{session_id}/recipe")
 async def get_recipe(session_id: str, visitor: str = Depends(visitor_id)):
     return {"recipe": owned_session(session_id, visitor).recipe_view()}

@@ -346,6 +346,7 @@ export function useNotebook() {
         isProcessing,
         error,
         clearError: () => setError(null),
+        showError: setError,
         upload,
         ask,
         run,

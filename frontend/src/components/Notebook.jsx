@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, ArrowUp, AlertCircle, X, Lock, LineChart, Wand2, Plus, Sparkles, Target, PanelLeftOpen, Upload } from 'lucide-react';
 import { PredictForm } from './PredictForm';
 import { KernelMenu } from './KernelMenu';
+import { ExportMenu } from './ExportMenu';
 import { StageProgress } from './StageProgress';
 import { Logo } from './Logo';
 import { NoteCell, AskCell, RunCell } from './Cells';
@@ -48,6 +49,7 @@ export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
                 </div>
                 <div className="flex shrink-0 items-center gap-2 sm:gap-3">
                     <StageProgress currentStage={summary?.stage || 'ACQUIRE'} />
+                    <ExportMenu nb={nb} />
                     <KernelMenu nb={nb} />
                 </div>
             </header>

@@ -99,6 +99,25 @@ export async function listSessions() {
     return apiRequest('/api/sessions', { method: 'GET' });
 }
 
+/** Download an export (cleaned data or the pipeline script) and save it as a file. */
+export async function downloadExport(sessionId, what, format = 'csv') {
+    const params = new URLSearchParams({ what, format });
+    const response = await fetch(`${API_URL}/api/session/${sessionId}/export?${params}`, {
+        headers: { 'X-Visitor-Id': visitorId() },
+    });
+    if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || `Export failed (HTTP ${response.status})`);
+    }
+    const name = /filename="([^"]+)"/.exec(response.headers.get('content-disposition') || '')?.[1] || 'export';
+    const url = URL.createObjectURL(await response.blob());
+    const link = Object.assign(document.createElement('a'), { href: url, download: name });
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export async function getConfig() {
     return apiRequest('/api/config', { method: 'GET' });
 }
