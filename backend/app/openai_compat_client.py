@@ -6,6 +6,7 @@ the fallback chain for named providers like Groq and OpenRouter.
 Uses the same briefing and reply parsing as the local Ollama client.
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Optional
@@ -64,10 +65,12 @@ async def get_openai_compatible_response(session: DataSession, user_message: str
     url = server.base_url.rstrip("/") + "/chat/completions"
     try:
         async with httpx.AsyncClient(timeout=server.timeout) as client:
-            resp = await client.post(url, json=payload, headers=headers)
+            # A hard limit on the whole request: some servers send keep-alive whitespace while
+            # thinking, which would otherwise reset httpx's "no data received" timer forever
+            resp = await asyncio.wait_for(client.post(url, json=payload, headers=headers), timeout=server.timeout)
     except httpx.ConnectError:
         return failure(f"{name} couldn't be reached. Check the address and that it's running.", "unreachable")
-    except httpx.TimeoutException:
+    except (httpx.TimeoutException, asyncio.TimeoutError):
         return failure(f"{name} took too long to answer. Please try again.", "timeout")
     except Exception:
         logger.exception("%s request failed", name)
@@ -76,6 +79,9 @@ async def get_openai_compatible_response(session: DataSession, user_message: str
     if resp.status_code in (401, 403):
         return failure(f"{name} rejected the API key. Check it in backend/.env.", "auth")
     if resp.status_code == 429:
+        # Shared free models can be overloaded "upstream": that's busy, not your allowance running out
+        if "upstream" in resp.text.lower() or "temporarily" in resp.text.lower():
+            return failure(f"{name}'s free model is overloaded right now. Please try again shortly.", "busy")
         return failure(f"{name}'s free allowance or rate limit was reached. Please try again shortly.", "quota")
     if resp.status_code >= 500:
         logger.warning("%s error %s: %s", name, resp.status_code, resp.text[:300])

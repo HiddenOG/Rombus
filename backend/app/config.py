@@ -34,7 +34,8 @@ class Settings(BaseSettings):
 
     # OpenRouter (hosted, many models incl. free ":free" variants)
     OPENROUTER_API_KEY: str = ""
-    OPENROUTER_MODEL: str = "qwen/qwen3.6-27b:free"
+    # Free models come and go; this one supported tool calling and answered in Oct 2026
+    OPENROUTER_MODEL: str = "nvidia/nemotron-3.5-lightning:free"
 
     # Local models via Ollama
     OLLAMA_URL: str = "http://localhost:11434"

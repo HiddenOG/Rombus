@@ -63,6 +63,24 @@ def test_error_statuses_give_failure_reasons(monkeypatch, session, status, reaso
     assert "TestServer" in out["response"]  # messages name the provider
 
 
+def test_upstream_overload_is_busy_not_quota(monkeypatch, session):
+    body = {"error": {"code": 429, "metadata": {"raw": "model is temporarily rate-limited upstream"}}}
+    fake_server(monkeypatch, lambda r: httpx.Response(429, json=body))
+    assert ask(session)["failure"] == "busy"
+
+
+def test_total_time_limit_even_with_keepalive(monkeypatch, session):
+    # A server that keeps "talking" (keep-alive) but never finishes must still time out
+    async def slow(request):
+        await asyncio.sleep(5)
+        return httpx.Response(200, json={})
+
+    fake_server(monkeypatch, slow)
+    out = asyncio.run(client_mod.get_openai_compatible_response(
+        session, "hi", Server("Slow", "http://fake/v1", "m", "k", timeout=0.2)))
+    assert out["failure"] == "timeout"
+
+
 def test_unreachable(monkeypatch, session):
     def handler(request):
         raise httpx.ConnectError("refused")
