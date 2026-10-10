@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends
 
-from app.access import limit, owned_session, visitor_id
+from app.access import current_owner, limit, owned_session
 from app.copilot import get_copilot_response
 from app.models import ChatRequest, ChatResponse
 from app.session import session_manager
@@ -11,7 +11,7 @@ router = APIRouter()
 
 
 @router.post("/chat", response_model=ChatResponse, dependencies=[Depends(limit("ai"))])
-async def chat_with_copilot(request: ChatRequest, visitor: str = Depends(visitor_id)):
+async def chat_with_copilot(request: ChatRequest, visitor: str = Depends(current_owner)):
     """Chat with the AI copilot."""
     session = owned_session(request.session_id, visitor)
 

@@ -25,6 +25,7 @@ def no_real_ai(monkeypatch):
     # Usage limits are tested on their own (test_access.py); elsewhere they'd only get in the way
     monkeypatch.setattr(settings, "RATE_LIMITS", False)
     monkeypatch.setattr(settings, "SESSION_TTL_HOURS", 0)
+    monkeypatch.setattr(settings, "SUPABASE_URL", "")
 
 
 VISITOR = "test-visitor-0000000001"

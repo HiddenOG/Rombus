@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import upload, chat, action, health, recipe
+from app.routers import upload, chat, action, health, recipe, account
 from app.session import session_manager
 
 logger = logging.getLogger(__name__)
@@ -47,19 +47,21 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS: only the configured sites may call the API. No cookies are used (visitors are
-    # identified by the X-Visitor-Id header), so credentials stay off.
+    # CORS: only the configured sites may call the API. No cookies are used (owners are identified
+    # by the Authorization and X-Visitor-Id headers), so credentials stay off.
     origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["Content-Type", "X-Visitor-Id"],
+        allow_headers=["Content-Type", "X-Visitor-Id", "Authorization"],
+        expose_headers=["Content-Disposition"],  # so exports keep their file names
     )
 
     # Include routers
     app.include_router(health.router, prefix="/api", tags=["Health"])
+    app.include_router(account.router, prefix="/api", tags=["Account"])
     app.include_router(upload.router, prefix="/api", tags=["Upload"])
     app.include_router(chat.router, prefix="/api", tags=["Chat"])
     app.include_router(action.router, prefix="/api", tags=["Action"])

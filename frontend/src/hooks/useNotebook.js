@@ -366,5 +366,6 @@ export function useNotebook() {
         openNotebook,
         newNotebook,
         deleteNotebook,
+        refreshNotebooks,
     };
 }

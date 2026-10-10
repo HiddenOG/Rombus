@@ -473,16 +473,25 @@ class SessionManager:
         ]
 
     def cleanup_expired(self) -> int:
-        """Delete notebooks (memory, files and records) unused for longer than SESSION_TTL_HOURS."""
+        """Delete anonymous notebooks (memory, files and records) unused for longer than SESSION_TTL_HOURS.
+        Notebooks in an account are kept: that's the point of signing in."""
         if settings.SESSION_TTL_HOURS <= 0:
             return 0
         cutoff = time.time() - (settings.SESSION_TTL_HOURS * 3600)
-        expired = set(sid for sid, s in self._sessions.items() if s.updated_at < cutoff)
+        expired = set(sid for sid, s in self._sessions.items()
+                      if s.updated_at < cutoff and not (s.owner or "").startswith("user:"))
         if self._db:
             expired |= set(self._db.older_than(cutoff))
         for sid in expired:
             self.delete_session(sid)
         return len(expired)
+
+    def transfer_owner(self, old: str, new: str) -> int:
+        """Give all of `old`'s notebooks to `new` (used when a visitor signs in)."""
+        for session in self._sessions.values():
+            if session.owner == old:
+                session.owner = new
+        return self._db.transfer_owner(old, new) if self._db else 0
 
     def delete_session(self, session_id: str):
         """Remove a notebook everywhere: memory, data files and its database record."""

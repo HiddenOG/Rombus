@@ -13,5 +13,6 @@ python-dotenv>=1.2
 shap>=0.48
 pyarrow>=25
 sqlalchemy>=2.0
+pyjwt[crypto]>=2.10  # checks Supabase login tokens
 matplotlib>=3.9  # charts drawn by custom view code (optional: views work without it)
 # For a PostgreSQL / Supabase DATABASE_URL, also install: psycopg[binary]

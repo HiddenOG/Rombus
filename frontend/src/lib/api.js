@@ -2,6 +2,8 @@
  * API Client — fetch wrapper with configurable base URL and error handling.
  */
 
+import { accessToken } from './supabase';
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
@@ -25,13 +27,22 @@ function visitorId() {
 }
 
 /**
+ * Who's asking: the login token when signed in (notebooks follow the account), plus this
+ * browser's visitor id (used when signed out, and to move its notebooks in on sign-in).
+ */
+async function identity() {
+    const token = await accessToken();
+    return { 'X-Visitor-Id': visitorId(), ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+}
+
+/**
  * Make an API request with standard error handling.
  */
 async function apiRequest(endpoint, options = {}) {
     const url = `${API_URL}${endpoint}`;
     const headers = {
         ...options.headers,
-        'X-Visitor-Id': visitorId(),
+        ...(await identity()),
     };
 
     // Don't set Content-Type for FormData (browser sets it with boundary)
@@ -103,7 +114,7 @@ export async function listSessions() {
 export async function downloadExport(sessionId, what, format = 'csv') {
     const params = new URLSearchParams({ what, format });
     const response = await fetch(`${API_URL}/api/session/${sessionId}/export?${params}`, {
-        headers: { 'X-Visitor-Id': visitorId() },
+        headers: await identity(),
     });
     if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -116,6 +127,11 @@ export async function downloadExport(sessionId, what, format = 'csv') {
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** After signing in: move the notebooks this browser made anonymously into the account. */
+export async function claimNotebooks() {
+    return apiRequest('/api/account/claim', { method: 'POST' });
 }
 
 export async function getConfig() {

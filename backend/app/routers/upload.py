@@ -5,7 +5,7 @@ import io
 import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
-from app.access import limit, visitor_id
+from app.access import current_owner, limit
 from app.config import settings
 from app.session import session_manager
 
@@ -15,7 +15,7 @@ ALLOWED = (".csv", ".xlsx", ".xls")
 
 
 @router.post("/upload", dependencies=[Depends(limit("upload"))])
-async def upload_file(file: UploadFile = File(...), visitor: str = Depends(visitor_id)):
+async def upload_file(file: UploadFile = File(...), visitor: str = Depends(current_owner)):
     """Upload a CSV or Excel file and create a new notebook owned by this visitor."""
     name = file.filename or "uploaded_file.csv"
     if not name.lower().endswith(ALLOWED):

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends
 
-from app.access import owned_session, visitor_id
+from app.access import current_owner, owned_session
 from app.models import ActionRequest, ActionResponse
 from app.session import session_manager
 from app.tools import execute_tool
@@ -11,7 +11,7 @@ router = APIRouter()
 
 
 @router.post("/action", response_model=ActionResponse)
-async def execute_action(request: ActionRequest, visitor: str = Depends(visitor_id)):
+async def execute_action(request: ActionRequest, visitor: str = Depends(current_owner)):
     """Execute a data science tool/action."""
     session = owned_session(request.session_id, visitor)
 

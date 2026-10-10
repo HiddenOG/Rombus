@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     # a public demo should set e.g. 72 so its disk doesn't fill up)
     SESSION_TTL_HOURS: int = 0
 
+    # Accounts (Supabase Auth). Your project's URL, e.g. https://abcd.supabase.co. No secret needed:
+    # login tokens are checked with the public key Supabase publishes. Empty = anonymous visitors only.
+    SUPABASE_URL: str = ""
+
     # Database. Empty = a local SQLite file in DATA_DIR (private, offline).
     # A PostgreSQL URL (e.g. from Supabase) works without code changes.
     DATABASE_URL: str = ""

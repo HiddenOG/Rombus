@@ -3,6 +3,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Sidebar } from './components/Sidebar';
 import { Notebook } from './components/Notebook';
 import { useNotebook } from './hooks/useNotebook';
+import { useAccount } from './hooks/useAccount';
 
 const SIDEBAR_KEY = 'automl.sidebar';
 const isDesktop = () => window.matchMedia('(min-width: 1024px)').matches;
@@ -22,6 +23,13 @@ function initialSidebar() {
  */
 const App = () => {
   const nb = useNotebook();
+  const account = useAccount({
+    onSignedIn: nb.refreshNotebooks,
+    onSignedOut: () => {
+      nb.newNotebook();
+      nb.refreshNotebooks();
+    },
+  });
   const [sidebarOpen, setSidebarOpen] = useState(initialSidebar);
 
   const toggleSidebar = () => {
@@ -56,6 +64,7 @@ const App = () => {
           onOpenNotebook={thenCloseOnPhone(nb.openNotebook)}
           onNewNotebook={nb.newNotebook}
           onDeleteNotebook={nb.deleteNotebook}
+          account={account}
         />
         <Notebook nb={nb} sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
       </div>

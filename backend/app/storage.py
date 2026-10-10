@@ -15,7 +15,7 @@ import os
 from typing import Any, Dict, List, Optional, Protocol
 
 import pandas as pd
-from sqlalchemy import Column, Float, Integer, MetaData, String, Table, Text, create_engine, delete, inspect, insert, select, text
+from sqlalchemy import Column, Float, Integer, MetaData, String, Table, Text, create_engine, delete, inspect, insert, select, text, update
 
 from app.config import settings
 
@@ -86,9 +86,18 @@ class Database:
             return [dict(r) for r in conn.execute(query).mappings()]
 
     def older_than(self, cutoff: float) -> List[str]:
+        """Anonymous notebooks unused since `cutoff`. Notebooks in an account are never expired."""
         t = sessions_table
+        query = select(t.c.session_id).where(
+            (t.c.updated_at < cutoff) & (t.c.owner.is_(None) | ~t.c.owner.startswith("user:")))
         with self.engine.connect() as conn:
-            return [r[0] for r in conn.execute(select(t.c.session_id).where(t.c.updated_at < cutoff))]
+            return [r[0] for r in conn.execute(query)]
+
+    def transfer_owner(self, old: str, new: str) -> int:
+        """Give all of `old`'s notebooks to `new`; returns how many moved."""
+        with self.engine.begin() as conn:
+            return conn.execute(
+                update(sessions_table).where(sessions_table.c.owner == old).values(owner=new)).rowcount
 
     def delete(self, session_id: str) -> None:
         with self.engine.begin() as conn:

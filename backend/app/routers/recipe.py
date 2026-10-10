@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.access import owned_session, visitor_id
+from app.access import current_owner, owned_session
 from app.config import settings
 from app.session import DataSession, session_manager
 from app.tools import BEFORE_SPLIT_TOOLS, TOOL_KINDS, TOOL_SPECS
@@ -38,7 +38,7 @@ async def list_tools():
 
 
 @router.get("/sessions")
-async def list_sessions(visitor: str = Depends(visitor_id)):
+async def list_sessions(visitor: str = Depends(current_owner)):
     return {"sessions": session_manager.list_sessions(owner=visitor)}
 
 
@@ -47,12 +47,12 @@ class CellsUpdate(BaseModel):
 
 
 @router.get("/session/{session_id}/cells")
-async def get_cells(session_id: str, visitor: str = Depends(visitor_id)):
+async def get_cells(session_id: str, visitor: str = Depends(current_owner)):
     return {"cells": owned_session(session_id, visitor).cells}
 
 
 @router.put("/session/{session_id}/cells")
-async def save_cells(session_id: str, body: CellsUpdate, visitor: str = Depends(visitor_id)):
+async def save_cells(session_id: str, body: CellsUpdate, visitor: str = Depends(current_owner)):
     """The notebook's cells, saved with the notebook so any browser can reopen it."""
     session = owned_session(session_id, visitor)
     session.cells = body.cells
@@ -61,14 +61,14 @@ async def save_cells(session_id: str, body: CellsUpdate, visitor: str = Depends(
 
 
 @router.delete("/session/{session_id}")
-async def delete_notebook(session_id: str, visitor: str = Depends(visitor_id)):
+async def delete_notebook(session_id: str, visitor: str = Depends(current_owner)):
     owned_session(session_id, visitor)  # 404 unless it exists and belongs to this visitor
     session_manager.delete_session(session_id)
     return {"success": True}
 
 
 @router.get("/session/{session_id}/export")
-async def export(session_id: str, what: str = "train", format: str = "csv", visitor: str = Depends(visitor_id)):
+async def export(session_id: str, what: str = "train", format: str = "csv", visitor: str = Depends(current_owner)):
     """Download cleaned data (what=train|all, format=csv|xlsx) or the pipeline (what=script)."""
     import re
     from fastapi.responses import Response
@@ -89,12 +89,12 @@ async def export(session_id: str, what: str = "train", format: str = "csv", visi
 
 
 @router.get("/session/{session_id}/recipe")
-async def get_recipe(session_id: str, visitor: str = Depends(visitor_id)):
+async def get_recipe(session_id: str, visitor: str = Depends(current_owner)):
     return {"recipe": owned_session(session_id, visitor).recipe_view()}
 
 
 @router.put("/session/{session_id}/recipe/{step_id}")
-async def update_step(session_id: str, step_id: str, body: StepUpdate, visitor: str = Depends(visitor_id)):
+async def update_step(session_id: str, step_id: str, body: StepUpdate, visitor: str = Depends(current_owner)):
     session = owned_session(session_id, visitor)
     try:
         line = session.update_step(step_id, body.args)
@@ -109,7 +109,7 @@ class CodeRequest(BaseModel):
 
 
 @router.post("/session/{session_id}/code")
-async def show_code(session_id: str, body: CodeRequest, visitor: str = Depends(visitor_id)):
+async def show_code(session_id: str, body: CodeRequest, visitor: str = Depends(current_owner)):
     """Code for an action or view cell, and whether it can be edited (recipe steps carry their own code)."""
     from app.action_code import code_info
     return code_info(owned_session(session_id, visitor), body.tool, body.args)
@@ -120,7 +120,7 @@ class CodeUpdate(BaseModel):
 
 
 @router.put("/session/{session_id}/recipe/{step_id}/code")
-async def update_step_code(session_id: str, step_id: str, body: CodeUpdate, visitor: str = Depends(visitor_id)):
+async def update_step_code(session_id: str, step_id: str, body: CodeUpdate, visitor: str = Depends(current_owner)):
     """Save edited code for a step. A built-in step becomes a custom code step (and remembers what it was)."""
     session = owned_session(session_id, visitor)
     try:
@@ -134,7 +134,7 @@ async def update_step_code(session_id: str, step_id: str, body: CodeUpdate, visi
 
 
 @router.post("/session/{session_id}/recipe/{step_id}/revert")
-async def revert_step(session_id: str, step_id: str, visitor: str = Depends(visitor_id)):
+async def revert_step(session_id: str, step_id: str, visitor: str = Depends(current_owner)):
     """Turn a custom code step back into the built-in step it started from."""
     session = owned_session(session_id, visitor)
     try:
@@ -153,7 +153,7 @@ class Move(BaseModel):
 
 
 @router.post("/session/{session_id}/recipe/{step_id}/move")
-async def move_step(session_id: str, step_id: str, body: Move, visitor: str = Depends(visitor_id)):
+async def move_step(session_id: str, step_id: str, body: Move, visitor: str = Depends(current_owner)):
     session = owned_session(session_id, visitor)
     try:
         line = session.move_step(step_id, body.direction)
@@ -164,7 +164,7 @@ async def move_step(session_id: str, step_id: str, body: Move, visitor: str = De
 
 
 @router.post("/session/{session_id}/restart")
-async def restart(session_id: str, visitor: str = Depends(visitor_id)):
+async def restart(session_id: str, visitor: str = Depends(current_owner)):
     """Restart, Jupyter-style: clear trained models and the AI's memory; rebuild the data from scratch."""
     session = owned_session(session_id, visitor)
     session.restart()
@@ -178,7 +178,7 @@ async def restart(session_id: str, visitor: str = Depends(visitor_id)):
 
 
 @router.delete("/session/{session_id}/recipe/{step_id}")
-async def delete_step(session_id: str, step_id: str, visitor: str = Depends(visitor_id)):
+async def delete_step(session_id: str, step_id: str, visitor: str = Depends(current_owner)):
     session = owned_session(session_id, visitor)
     try:
         removed = session.delete_step(step_id)

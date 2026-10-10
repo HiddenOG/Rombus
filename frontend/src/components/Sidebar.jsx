@@ -2,11 +2,12 @@ import React, { useCallback, useState } from 'react';
 import { Upload, FileSpreadsheet, Layers, Sparkles, Undo2, Lock, Target, Boxes, NotebookPen, Plus, Trash2, PanelLeftClose } from 'lucide-react';
 import { Logo } from './Logo';
 import { ConfirmDialog } from './ConfirmDialog';
+import { AccountPanel } from './AccountPanel';
 
 /**
  * Sidebar — brand, dataset overview and column evidence panel.
  */
-export function Sidebar({ open, onClose, sessionId, summary, onFileUpload, isProcessing, notebooks = [], onOpenNotebook, onNewNotebook, onDeleteNotebook }) {
+export function Sidebar({ open, onClose, sessionId, summary, onFileUpload, isProcessing, notebooks = [], onOpenNotebook, onNewNotebook, onDeleteNotebook, account }) {
     return (
         <>
             {/* Phones/tablets: the sidebar is a drawer over the page, with a dimmed backdrop */}
@@ -47,6 +48,7 @@ export function Sidebar({ open, onClose, sessionId, summary, onFileUpload, isPro
                     </>
                 )}
             </div>
+            <AccountPanel account={account} />
             </aside>
         </>
     );
