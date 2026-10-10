@@ -9,6 +9,16 @@ export function CodeEditor({ initialCode, onSave, onCancel, busy, saveLabel = 'S
     const [code, setCode] = useState(initialCode);
 
     const onKeyDown = (e) => {
+        // Jupyter habits: Shift+Enter runs, Escape leaves the editor
+        if (e.key === 'Enter' && e.shiftKey) {
+            e.preventDefault();
+            if (!busy) onSave(code);
+            return;
+        }
+        if (e.key === 'Escape') {
+            onCancel();
+            return;
+        }
         if (e.key !== 'Tab') return;
         e.preventDefault();
         const el = e.target;
@@ -37,7 +47,8 @@ export function CodeEditor({ initialCode, onSave, onCancel, busy, saveLabel = 'S
             />
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                 <p className="text-xs text-ink-3">
-                    Runs on your machine with full access, like a Jupyter cell. Saving replays every later step.
+                    <kbd className="rounded border border-line bg-surface-2 px-1 font-mono text-[10px]">Shift</kbd>+<kbd className="rounded border border-line bg-surface-2 px-1 font-mono text-[10px]">Enter</kbd> runs.
+                    Runs on your machine with full access, like a Jupyter cell.
                 </p>
                 <div className="flex shrink-0 gap-2">
                     <button type="button" onClick={onCancel} className="rounded-lg px-3 py-1.5 text-sm font-medium text-ink-2 hover:bg-surface-2">

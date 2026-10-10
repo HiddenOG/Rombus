@@ -112,6 +112,17 @@ export async function revertStep(sessionId, stepId) {
     return apiRequest(`/api/session/${sessionId}/recipe/${stepId}/revert`, { method: 'POST' });
 }
 
+export async function moveStep(sessionId, stepId, direction) {
+    return apiRequest(`/api/session/${sessionId}/recipe/${stepId}/move`, {
+        method: 'POST',
+        body: JSON.stringify({ direction }),
+    });
+}
+
+export async function restartSession(sessionId) {
+    return apiRequest(`/api/session/${sessionId}/restart`, { method: 'POST' });
+}
+
 export async function deleteStep(sessionId, stepId) {
     return apiRequest(`/api/session/${sessionId}/recipe/${stepId}`, { method: 'DELETE' });
 }

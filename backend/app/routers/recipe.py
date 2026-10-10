@@ -131,6 +131,35 @@ async def revert_step(session_id: str, step_id: str, _: str = Depends(verify_api
     return _respond(session, f"Reverted to the built-in '{line.tool.replace('_', ' ')}' step. {line.message}")
 
 
+class Move(BaseModel):
+    direction: int  # -1 = earlier, +1 = later
+
+
+@router.post("/session/{session_id}/recipe/{step_id}/move")
+async def move_step(session_id: str, step_id: str, body: Move, _: str = Depends(verify_api_key)):
+    session = _session(session_id)
+    try:
+        line = session.move_step(step_id, body.direction)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _respond(session, f"Moved '{line.tool.replace('_', ' ')}' {'later' if body.direction > 0 else 'earlier'} "
+                             f"and replayed the recipe.")
+
+
+@router.post("/session/{session_id}/restart")
+async def restart(session_id: str, _: str = Depends(verify_api_key)):
+    """Restart, Jupyter-style: clear trained models and the AI's memory; rebuild the data from scratch."""
+    session = _session(session_id)
+    session.restart()
+    session_manager.save(session)
+    return {
+        "success": True,
+        "message": "Restarted: trained models and the AI's conversation memory were cleared, and the training "
+                   f"rows were rebuilt from scratch by replaying {len(session.recipe)} recipe steps.",
+        "new_state_summary": session.get_summary(),
+    }
+
+
 @router.delete("/session/{session_id}/recipe/{step_id}")
 async def delete_step(session_id: str, step_id: str, _: str = Depends(verify_api_key)):
     session = _session(session_id)

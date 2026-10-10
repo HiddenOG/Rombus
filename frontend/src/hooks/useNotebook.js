@@ -197,7 +197,7 @@ export function useNotebook() {
             return;
         }
         setSummary(data.new_state_summary);
-        patchCell(cell.id, { message: data.message, evidence: data.evidence, version: data.new_state_summary?.data_version });
+        patchCell(cell.id, { message: data.message, evidence: data.evidence, version: data.new_state_summary?.data_version, cleared: false });
     });
 
     const editStep = (cell, args) => busy(async () => {
@@ -270,6 +270,69 @@ export function useNotebook() {
 
     const copyCell = (cell) => run({ tool: cell.tool, arguments: cell.args }, cell.id);
 
+    // Change an action cell's settings and run it again in place (e.g. re-lock at 30%)
+    const editAction = (cell, args) => busy(async () => {
+        const data = await api.executeAction(sessionId, cell.tool, args);
+        if (!data.success) {
+            setError(data.message || 'That change failed.');
+            return false;
+        }
+        setSummary(data.new_state_summary);
+        patchCell(cell.id, { args, message: data.message, evidence: data.evidence, version: data.new_state_summary?.data_version });
+        return true;
+    });
+
+    // Swap a step with its neighbour in the recipe, then show the cells in the new order
+    const moveCell = (cell, direction) => busy(async () => {
+        const data = await api.moveStep(sessionId, cell.stepId, direction);
+        setSummary(data.new_state_summary);
+        const order = data.new_state_summary.recipe.map(s => s.id);
+        setCells(prev => {
+            const stepCells = prev.filter(c => c.stepId && order.includes(c.stepId))
+                .sort((a, b) => order.indexOf(a.stepId) - order.indexOf(b.stepId));
+            let i = 0;
+            return prev.map(c => (c.stepId && order.includes(c.stepId) ? stepCells[i++] : c));
+        });
+    });
+
+    // ── Kernel controls (like Jupyter's) ─────────────────────────────────────
+    // Never re-run automatically: choosing the target (re-lock), the final exam (another look at the
+    // test rows), and one-off actions
+    const NO_AUTO_RERUN = new Set(['select_target', 'final_exam', 'undo', 'save_model', 'transition_stage']);
+
+    const restart = () => busy(async () => {
+        const data = await api.restartSession(sessionId);
+        setSummary(data.new_state_summary);
+        addCell({ type: 'note', text: data.message });
+    });
+
+    const runAll = (restartFirst) => busy(async () => {
+        if (restartFirst) {
+            const data = await api.restartSession(sessionId);
+            setSummary(data.new_state_summary);
+        }
+        const toRun = cells.filter(c => c.type === 'run' && !c.stepId && !NO_AUTO_RERUN.has(c.tool));
+        let ok = 0;
+        for (const cell of toRun) {
+            const data = await api.executeAction(sessionId, cell.tool, cell.args || {});
+            if (data.success) {
+                ok += 1;
+                setSummary(data.new_state_summary);
+                patchCell(cell.id, { message: data.message, evidence: data.evidence, version: data.new_state_summary?.data_version, cleared: false });
+            } else {
+                patchCell(cell.id, { message: `⚠ ${data.message}`, evidence: null });
+            }
+        }
+        const skipped = cells.filter(c => c.type === 'run' && NO_AUTO_RERUN.has(c.tool)).length;
+        addCell({
+            type: 'note',
+            text: `${restartFirst ? 'Restarted, rebuilt the data from scratch, and re-ran' : 'Re-ran'} ${ok} of ${toRun.length} cells. ` +
+                (skipped ? `Skipped ${skipped} (target, final exam and one-off actions are never re-run automatically).` : ''),
+        });
+    });
+
+    const clearOutputs = () => setCells(prev => prev.map(c => (c.type === 'run' ? { ...c, evidence: null, cleared: true } : c)));
+
     return {
         sessionId,
         summary,
@@ -288,6 +351,11 @@ export function useNotebook() {
         revertCell,
         customizeCell,
         revertAction,
+        editAction,
+        moveCell,
+        restart,
+        runAll,
+        clearOutputs,
         deleteCell,
         copyCell,
         openNotebook,

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, ArrowUp, AlertCircle, X, Lock, LineChart, Wand2, Plus, Sparkles, Target, PanelLeftOpen, Upload } from 'lucide-react';
 import { PredictForm } from './PredictForm';
+import { KernelMenu } from './KernelMenu';
 import { StageProgress } from './StageProgress';
 import { Logo } from './Logo';
 import { NoteCell, AskCell, RunCell } from './Cells';
@@ -45,7 +46,10 @@ export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
                     <span className="truncate font-semibold text-ink">{summary?.filename || 'Notebook'}</span>
                     <span className="hidden text-ink-3 sm:inline">{isProcessing ? 'working…' : 'ready'}</span>
                 </div>
-                <StageProgress currentStage={summary?.stage || 'ACQUIRE'} />
+                <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+                    <StageProgress currentStage={summary?.stage || 'ACQUIRE'} />
+                    <KernelMenu nb={nb} />
+                </div>
             </header>
 
             <div className="flex-1 overflow-y-auto custom-scrollbar">
@@ -71,6 +75,8 @@ export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
                                 onRevert={nb.revertCell}
                                 onCustomize={nb.customizeCell}
                                 onRevertAction={nb.revertAction}
+                                onEditAction={nb.editAction}
+                                onMove={nb.moveCell}
                                 onCopy={nb.copyCell}
                                 onDelete={nb.deleteCell}
                                 onRerun={nb.rerun}

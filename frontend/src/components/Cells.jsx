@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Markdown from 'react-markdown';
-import { Pencil, Copy, Trash2, RotateCw, Info, StickyNote, AlertTriangle, Loader2, Ban, Lock } from 'lucide-react';
+import remarkGfm from 'remark-gfm';
+import { Pencil, Copy, Trash2, RotateCw, Info, StickyNote, AlertTriangle, Loader2, Ban, Lock, ArrowUp, ArrowDown } from 'lucide-react';
 import { Logo } from './Logo';
 import { ActionButton } from './ActionButton';
 import { EvidenceCard } from './EvidenceCard';
@@ -10,6 +11,9 @@ import { CodeEditor } from './CodeEditor';
 import { getActionCode } from '../lib/api';
 
 const humanize = (s) => s.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+
+// GitHub-style Markdown: tables, strikethrough, task lists (AI replies often use tables)
+const MARKDOWN_PLUGINS = [remarkGfm];
 
 const KIND = {
     learn: { label: 'Changes data · learns', className: 'bg-brand-50 text-brand-700 border-brand-200' },
@@ -35,7 +39,7 @@ export function NoteCell({ cell }) {
             <Gutter />
             <div className="flex flex-1 items-start gap-2 rounded-xl px-3 py-2 text-sm text-ink-2">
                 <Info className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" />
-                <div className="prose-chat"><Markdown>{cell.text}</Markdown></div>
+                <div className="prose-chat"><Markdown remarkPlugins={MARKDOWN_PLUGINS}>{cell.text}</Markdown></div>
             </div>
         </div>
     );
@@ -58,7 +62,7 @@ export function AskCell({ cell, number, onRun, isProcessing }) {
                             </p>
                         ) : (
                             <div className={`prose-chat text-[15px] leading-relaxed ${cell.status === 'error' ? 'text-red-700' : 'text-ink-2'}`}>
-                                <Markdown>{cell.reply || ''}</Markdown>
+                                <Markdown remarkPlugins={MARKDOWN_PLUGINS}>{cell.reply || ''}</Markdown>
                             </div>
                         )}
                         {cell.suggestions?.length > 0 && (
@@ -82,7 +86,7 @@ export function AskCell({ cell, number, onRun, isProcessing }) {
     );
 }
 
-export function RunCell({ cell, number, tool, step, summary, sessionId, isProcessing, onEdit, onEditCode, onRevert, onCustomize, onRevertAction, onCopy, onDelete, onRerun }) {
+export function RunCell({ cell, number, tool, step, summary, sessionId, isProcessing, onEdit, onEditCode, onRevert, onCustomize, onRevertAction, onEditAction, onMove, onCopy, onDelete, onRerun }) {
     const [editing, setEditing] = useState(false);
     const [tab, setTab] = useState('result');
     const [editingCode, setEditingCode] = useState(false);
@@ -123,8 +127,11 @@ export function RunCell({ cell, number, tool, step, summary, sessionId, isProces
     const args = Object.fromEntries(Object.entries(allArgs).filter(([k]) => k !== 'code' && k !== 'based_on'));
     const columns = summary?.columns?.map(c => c.name) || [];
 
+    // Settings can be edited on recipe steps, and on "Select target" (re-lock with a new percentage)
+    const isRelock = cell.tool === 'select_target';
     const save = async (newArgs) => {
-        if (await onEdit(cell, newArgs)) setEditing(false);
+        const ok = isStep ? await onEdit(cell, newArgs) : await onEditAction(cell, newArgs);
+        if (ok) setEditing(false);
     };
     const saveCode = async (code) => {
         if (await onEditCode(cell, code)) setEditingCode(false);
@@ -183,7 +190,17 @@ export function RunCell({ cell, number, tool, step, summary, sessionId, isProces
                     </div>
                     <div className="flex shrink-0 items-center gap-0.5">
                         {isStep && !removed && (
-                            <IconButton label={isCustom ? 'Edit code' : 'Edit settings'} onClick={startEditing} disabled={isProcessing}>
+                            <>
+                                <IconButton label="Move earlier in the recipe" onClick={() => onMove(cell, -1)} disabled={isProcessing || step?.index === 0}>
+                                    <ArrowUp className="h-3.5 w-3.5" />
+                                </IconButton>
+                                <IconButton label="Move later in the recipe" onClick={() => onMove(cell, 1)} disabled={isProcessing || step?.index === (summary?.recipe?.length ?? 1) - 1}>
+                                    <ArrowDown className="h-3.5 w-3.5" />
+                                </IconButton>
+                            </>
+                        )}
+                        {((isStep && !removed) || isRelock) && (
+                            <IconButton label={isCustom ? 'Edit code' : isRelock ? 'Change target or test percentage' : 'Edit settings'} onClick={startEditing} disabled={isProcessing}>
                                 <Pencil className="h-3.5 w-3.5" />
                             </IconButton>
                         )}
@@ -232,6 +249,14 @@ export function RunCell({ cell, number, tool, step, summary, sessionId, isProces
                                 <p key={w} className="rounded-md bg-red-50 px-2 py-1.5 font-medium text-red-800">⚠ {w}</p>
                             ))}
                         </div>
+                    )}
+
+                    {editing && isRelock && (
+                        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                            Re-locking makes a new split and replays your recipe on it. The test rows have been locked{' '}
+                            <strong>{summary?.lock_count ?? 1} time{summary?.lock_count === 1 ? '' : 's'}</strong> so far; changing the split
+                            again and again until the score looks good would be cheating, so every re-lock is counted.
+                        </p>
                     )}
 
                     {editing && tool && !isCustom && (
@@ -339,6 +364,9 @@ export function RunCell({ cell, number, tool, step, summary, sessionId, isProces
                             )}
 
                             {cell.evidence && <EvidenceCard evidence={cell.evidence} />}
+                            {cell.cleared && !cell.evidence && (
+                                <p className="text-xs italic text-ink-3">Output cleared. Re-run the cell to see it again.</p>
+                            )}
                         </>
                     )}
                 </div>

@@ -122,6 +122,30 @@ class DataSession:
         self._set_recipe(lines)
         return self.recipe[index]
 
+    def move_step(self, step_id: str, direction: int) -> Line:
+        """Swap a line with its neighbour (-1 = earlier, +1 = later) and replay."""
+        index = self.index_of(step_id)
+        target = index + (1 if direction > 0 else -1)
+        if not 0 <= target < len(self.recipe):
+            raise ValueError("That step is already at the " + ("end." if direction > 0 else "start."))
+        lines = list(self.recipe)
+        lines[index], lines[target] = lines[target], lines[index]
+        self._set_recipe(lines)
+        return self.recipe[target]
+
+    def restart(self) -> None:
+        """Like restarting a Jupyter kernel: forget everything held in memory, keep the notebook.
+
+        Trained models, the practice split and the AI's conversation memory are cleared, and the
+        training rows are rebuilt from the raw rows by replaying the recipe from the top.
+        """
+        self.memory = []
+        if self.raw_train is not None:
+            self._set_recipe(self.recipe)
+        else:
+            self._clear_models()
+        self.models_cleared = False
+
     def delete_step(self, step_id: str) -> Line:
         """Remove any line (not just the last) and replay what's left."""
         index = self.index_of(step_id)
