@@ -11,7 +11,7 @@ from app.config import settings
 from app.recipe import STEP_TYPES, Context, Line, apply_to, run_line
 from app.recipe_code import step_code
 from app.code_checks import peeking_warnings
-from app.storage import Database, LocalFileStore, database_url
+from app.storage import Database, FileStore, database_url, file_store
 
 logger = logging.getLogger(__name__)
 
@@ -354,13 +354,19 @@ class SessionManager:
     def __init__(self):
         self._sessions: Dict[str, DataSession] = {}
         self._db: Optional[Database] = None
-        self._files: Optional[LocalFileStore] = None
+        self._files: Optional[FileStore] = None
+        # The table last saved under each file key. The data tables are only ever replaced, never
+        # changed in place, so "same object as last time" means "unchanged": skip the upload.
+        # (Cells autosave constantly; re-uploading a dataset each time would be slow over the internet.)
+        self._saved_files: Dict[str, pd.DataFrame] = {}
 
     def initialize(self):
-        """Open the database (SQLite by default, PostgreSQL via DATABASE_URL) and the file store."""
+        """Open the database (SQLite by default, PostgreSQL via DATABASE_URL) and the file store
+        (this machine by default, Supabase Storage with SUPABASE_SECRET_KEY)."""
         os.makedirs(settings.DATA_DIR, exist_ok=True)
         self._db = Database(database_url())
-        self._files = LocalFileStore(settings.DATA_DIR)
+        self._files = file_store()
+        self._saved_files.clear()
 
     def create_session(self, df: pd.DataFrame, filename: str, owner: Optional[str] = None) -> DataSession:
         """Create a new session and persist it."""
@@ -380,10 +386,14 @@ class SessionManager:
         return session
 
     def _save_or_delete(self, key: str, df: Optional[pd.DataFrame]) -> None:
-        if df is not None:
+        if df is None:
+            already_gone = key in self._saved_files and self._saved_files[key] is None
+            if not already_gone:
+                self._files.delete(key)
+                self._saved_files[key] = None
+        elif self._saved_files.get(key) is not df:
             self._files.save(key, df)
-        else:
-            self._files.delete(key)
+            self._saved_files[key] = df
 
     def _persist_session(self, session: DataSession):
         """Save what's needed to rebuild the session: original rows, the lock, the recipe, the cells.
@@ -396,7 +406,7 @@ class SessionManager:
 
         session.updated_at = time.time()
         sid = session.session_id
-        self._files.save(f"{sid}_original", session.original_df)
+        self._save_or_delete(f"{sid}_original", session.original_df)
         self._save_or_delete(f"{sid}_train", session.raw_train)
         self._save_or_delete(f"{sid}_test", session.test_df)
 
@@ -453,6 +463,10 @@ class SessionManager:
                 session._set_recipe(lines)
                 session.models_cleared = False
 
+            # What's in storage now matches memory: nothing to upload until it changes
+            self._saved_files.update({f"{session_id}_original": session.original_df,
+                                      f"{session_id}_train": session.raw_train,
+                                      f"{session_id}_test": session.test_df})
             return session
         except Exception:
             logger.exception("Could not load session %s", session_id)
@@ -499,6 +513,7 @@ class SessionManager:
         if self._files:
             for suffix in ("", "_original", "_train", "_test"):
                 self._files.delete(f"{session_id}{suffix}")
+                self._saved_files.pop(f"{session_id}{suffix}", None)
         if self._db:
             self._db.delete(session_id)
 

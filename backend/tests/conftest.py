@@ -26,6 +26,9 @@ def no_real_ai(monkeypatch):
     monkeypatch.setattr(settings, "RATE_LIMITS", False)
     monkeypatch.setattr(settings, "SESSION_TTL_HOURS", 0)
     monkeypatch.setattr(settings, "SUPABASE_URL", "")
+    # Never touch the real Supabase database or Storage from tests
+    monkeypatch.setattr(settings, "SUPABASE_SECRET_KEY", "")
+    monkeypatch.setattr(settings, "DATABASE_URL", "")
 
 
 VISITOR = "test-visitor-0000000001"

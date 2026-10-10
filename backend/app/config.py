@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     # login tokens are checked with the public key Supabase publishes. Empty = anonymous visitors only.
     SUPABASE_URL: str = ""
 
+    # File storage. With the secret key, data files go to a private Supabase Storage bucket instead
+    # of DATA_DIR. The secret key can read and write everything: server only, never in the frontend.
+    SUPABASE_SECRET_KEY: str = Field("", validation_alias=AliasChoices("SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY"))
+    STORAGE_BUCKET: str = "notebooks"
+
     # Database. Empty = a local SQLite file in DATA_DIR (private, offline).
     # A PostgreSQL URL (e.g. from Supabase) works without code changes.
     DATABASE_URL: str = ""
