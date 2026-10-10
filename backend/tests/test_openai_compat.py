@@ -8,15 +8,14 @@ import pandas as pd
 import pytest
 
 from app import openai_compat_client as client_mod
-from app.config import settings
+from app.openai_compat_client import Server
 from app.session import DataSession
+
+SERVER = Server("TestServer", "http://fake-server/v1", "qwen-test", "secret")
 
 
 @pytest.fixture
-def session(monkeypatch):
-    monkeypatch.setattr(settings, "AI_BASE_URL", "http://fake-server/v1")
-    monkeypatch.setattr(settings, "AI_MODEL", "qwen-test")
-    monkeypatch.setattr(settings, "AI_API_KEY", "secret")
+def session():
     return DataSession(pd.DataFrame({"age": [1, 2], "churned": ["y", "n"]}), "d.csv")
 
 
@@ -25,22 +24,25 @@ def fake_server(monkeypatch, handler):
     monkeypatch.setattr(client_mod.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
 
 
-def ask(session):
-    return asyncio.run(client_mod.get_openai_compatible_response(session, "what now?"))
+def ask(session, server=SERVER):
+    return asyncio.run(client_mod.get_openai_compatible_response(session, "what now?", server))
 
 
-def test_request_and_tool_call(monkeypatch, session):
+def test_request_tool_call_and_usage(monkeypatch, session):
     seen = {}
 
     def handler(request):
         seen["url"] = str(request.url)
         seen["auth"] = request.headers.get("authorization")
         seen["body"] = json.loads(request.content)
-        return httpx.Response(200, json={"choices": [{"message": {
-            "content": "Pick the target.",
-            "tool_calls": [{"type": "function", "function": {
-                "name": "select_target", "arguments": '{"column": "churned", "explanation": "outcome"}'}}],
-        }}]})
+        return httpx.Response(200, json={
+            "choices": [{"message": {
+                "content": "Pick the target.",
+                "tool_calls": [{"type": "function", "function": {
+                    "name": "select_target", "arguments": '{"column": "churned", "explanation": "outcome"}'}}],
+            }}],
+            "usage": {"prompt_tokens": 2000, "completion_tokens": 50},
+        })
 
     fake_server(monkeypatch, handler)
     out = ask(session)
@@ -49,17 +51,16 @@ def test_request_and_tool_call(monkeypatch, session):
     assert seen["body"]["model"] == "qwen-test"
     assert out["response"] == "Pick the target."
     assert out["suggested_actions"] == [{"tool": "select_target", "arguments": {"column": "churned"}, "explanation": "outcome"}]
+    assert out["usage"] == {"input_tokens": 2000, "output_tokens": 50}
+    assert "failure" not in out
 
 
-@pytest.mark.parametrize("status,expected", [
-    (401, client_mod.KEY_MESSAGE),
-    (429, client_mod.QUOTA_MESSAGE),
-    (503, client_mod.BUSY_MESSAGE),
-    (400, client_mod.GENERIC_MESSAGE),
-])
-def test_error_statuses(monkeypatch, session, status, expected):
+@pytest.mark.parametrize("status,reason", [(401, "auth"), (429, "quota"), (503, "busy"), (400, "error")])
+def test_error_statuses_give_failure_reasons(monkeypatch, session, status, reason):
     fake_server(monkeypatch, lambda r: httpx.Response(status, json={"error": "x"}))
-    assert ask(session)["response"] == expected
+    out = ask(session)
+    assert out["failure"] == reason
+    assert "TestServer" in out["response"]  # messages name the provider
 
 
 def test_unreachable(monkeypatch, session):
@@ -67,9 +68,15 @@ def test_unreachable(monkeypatch, session):
         raise httpx.ConnectError("refused")
 
     fake_server(monkeypatch, handler)
-    assert ask(session)["response"] == client_mod.NOT_REACHABLE_MESSAGE
+    assert ask(session)["failure"] == "unreachable"
 
 
-def test_not_configured(monkeypatch, session):
-    monkeypatch.setattr(settings, "AI_BASE_URL", "")
-    assert "Set AI_BASE_URL" in ask(session)["response"]
+def test_not_configured(session):
+    assert ask(session, Server("X", "", ""))["failure"] == "config"
+    assert ask(session, Server("Hosted", "https://api.example.com/v1", "m", ""))["failure"] == "config"  # key needed
+
+
+def test_groq_key_accepts_either_name(monkeypatch):
+    from app.config import Settings
+    monkeypatch.setenv("GROQ_KEY", "gsk_from_short_name")
+    assert Settings(_env_file=None).GROQ_API_KEY == "gsk_from_short_name"

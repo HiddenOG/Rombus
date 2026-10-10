@@ -27,9 +27,12 @@ async def chat_with_copilot(
 
     # Get AI response
     parsed = await get_copilot_response(session, request.message)
+    failed = bool(parsed.get("failure"))
 
-    # Save assistant response to memory
-    session.memory.append({"role": "assistant", "content": parsed["response"]})
+    # Save the assistant's reply to memory, but not error notices: the next AI would read them
+    # as if it had said them
+    if not failed:
+        session.memory.append({"role": "assistant", "content": parsed["response"]})
 
     # Persist session
     session_manager.save(session)
@@ -38,4 +41,9 @@ async def chat_with_copilot(
         response=parsed["response"],
         suggested_actions=parsed.get("suggested_actions", []),
         current_stage=session.current_stage,
+        provider=parsed.get("provider"),
+        model=parsed.get("model"),
+        usage=parsed.get("usage"),
+        fallback_note=parsed.get("fallback_note"),
+        failed=failed,
     )

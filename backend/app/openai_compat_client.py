@@ -1,71 +1,97 @@
 """Any OpenAI-compatible inference server: vLLM, SGLang, LM Studio, llama.cpp server,
 or hosted open-model APIs (Groq, Together, OpenRouter, Fireworks …).
 
-Set AI_PROVIDER=openai_compatible with AI_BASE_URL, AI_MODEL and (for hosted APIs) AI_API_KEY.
+Used directly with AI_PROVIDER=openai_compatible (AI_BASE_URL / AI_MODEL / AI_API_KEY), and by
+the fallback chain for named providers like Groq and OpenRouter.
 Uses the same briefing and reply parsing as the local Ollama client.
 """
 
 import logging
+from dataclasses import dataclass
+from typing import Optional
 
 import httpx
 
 from app.config import settings
+from app.copilot_prompt import failure
 from app.ollama_client import build_messages, build_tools, parse_message
 from app.session import DataSession
 
 logger = logging.getLogger(__name__)
 
-NOT_REACHABLE_MESSAGE = "The inference server couldn't be reached. Check AI_BASE_URL and that the server is running."
-KEY_MESSAGE = "The inference server rejected the API key. Check AI_API_KEY in backend/.env."
-QUOTA_MESSAGE = "The inference server's rate limit or quota was reached. Please try again shortly."
-BUSY_MESSAGE = "The inference server is busy or had an error. Please try again in a moment."
-SLOW_MESSAGE = "The inference server took too long to answer. Please try again."
-GENERIC_MESSAGE = "Something went wrong while asking the inference server. Please try again."
+
+@dataclass
+class Server:
+    label: str      # shown to people, e.g. "Groq"
+    base_url: str
+    model: str
+    api_key: str = ""
+    timeout: float = 120
 
 
-def _fail(message: str) -> dict:
-    return {"response": message, "suggested_actions": []}
+def configured_server() -> Server:
+    return Server("Inference server", settings.AI_BASE_URL, settings.AI_MODEL, settings.AI_API_KEY,
+                  settings.AI_TIMEOUT_SECONDS)
 
 
-async def get_openai_compatible_response(session: DataSession, user_message: str) -> dict:
-    """Ask the configured server; never raises, returns a plain-English message on failure."""
-    if not settings.AI_BASE_URL or not settings.AI_MODEL:
-        return _fail("Set AI_BASE_URL and AI_MODEL in backend/.env to use an inference server.")
+def groq_server() -> Server:
+    return Server("Groq", "https://api.groq.com/openai/v1", settings.GROQ_MODEL, settings.GROQ_API_KEY,
+                  settings.AI_TIMEOUT_SECONDS)
+
+
+def openrouter_server() -> Server:
+    return Server("OpenRouter", "https://openrouter.ai/api/v1", settings.OPENROUTER_MODEL, settings.OPENROUTER_API_KEY,
+                  settings.AI_TIMEOUT_SECONDS)
+
+
+async def get_openai_compatible_response(session: DataSession, user_message: str, server: Optional[Server] = None) -> dict:
+    """Ask the server; never raises. Failures come back with a `failure` reason for the chain."""
+    server = server or configured_server()
+    name = server.label
+    if not server.base_url or not server.model:
+        return failure(f"{name} isn't set up: its address or model name is missing in backend/.env.", "config")
+    if not server.api_key and "localhost" not in server.base_url and "127.0.0.1" not in server.base_url:
+        return failure(f"{name} needs an API key in backend/.env.", "config")
 
     payload = {
-        "model": settings.AI_MODEL,
+        "model": server.model,
         "messages": build_messages(session, user_message),
         "tools": build_tools(session),
         "tool_choice": "auto",
         "temperature": 0.2,
     }
-    headers = {"Authorization": f"Bearer {settings.AI_API_KEY}"} if settings.AI_API_KEY else {}
-    url = settings.AI_BASE_URL.rstrip("/") + "/chat/completions"
+    headers = {"Authorization": f"Bearer {server.api_key}"} if server.api_key else {}
+    url = server.base_url.rstrip("/") + "/chat/completions"
     try:
-        async with httpx.AsyncClient(timeout=settings.AI_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(timeout=server.timeout) as client:
             resp = await client.post(url, json=payload, headers=headers)
     except httpx.ConnectError:
-        return _fail(NOT_REACHABLE_MESSAGE)
+        return failure(f"{name} couldn't be reached. Check the address and that it's running.", "unreachable")
     except httpx.TimeoutException:
-        return _fail(SLOW_MESSAGE)
+        return failure(f"{name} took too long to answer. Please try again.", "timeout")
     except Exception:
-        logger.exception("Inference server request failed")
-        return _fail(GENERIC_MESSAGE)
+        logger.exception("%s request failed", name)
+        return failure(f"Something went wrong while asking {name}. Please try again.", "error")
 
     if resp.status_code in (401, 403):
-        return _fail(KEY_MESSAGE)
+        return failure(f"{name} rejected the API key. Check it in backend/.env.", "auth")
     if resp.status_code == 429:
-        return _fail(QUOTA_MESSAGE)
+        return failure(f"{name}'s free allowance or rate limit was reached. Please try again shortly.", "quota")
     if resp.status_code >= 500:
-        logger.warning("Inference server error %s: %s", resp.status_code, resp.text[:300])
-        return _fail(BUSY_MESSAGE)
+        logger.warning("%s error %s: %s", name, resp.status_code, resp.text[:300])
+        return failure(f"{name} is busy or had an error. Please try again in a moment.", "busy")
     if resp.status_code >= 400:
-        logger.warning("Inference server refused the request %s: %s", resp.status_code, resp.text[:300])
-        return _fail(GENERIC_MESSAGE)
+        logger.warning("%s refused the request %s: %s", name, resp.status_code, resp.text[:300])
+        return failure(f"{name} couldn't handle the request.", "error")
 
     try:
-        message = resp.json()["choices"][0]["message"]
+        body = resp.json()
+        message = body["choices"][0]["message"]
     except (ValueError, KeyError, IndexError):
-        logger.warning("Unexpected inference server reply: %s", resp.text[:300])
-        return _fail(GENERIC_MESSAGE)
-    return parse_message(message)
+        logger.warning("Unexpected reply from %s: %s", name, resp.text[:300])
+        return failure(f"{name} sent a reply the app couldn't read.", "error")
+
+    reply = parse_message(message)
+    usage = body.get("usage") or {}
+    reply["usage"] = {"input_tokens": usage.get("prompt_tokens"), "output_tokens": usage.get("completion_tokens")}
+    return reply

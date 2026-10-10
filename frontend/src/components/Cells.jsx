@@ -68,6 +68,13 @@ export function AskCell({ cell, number, onRun, isProcessing }) {
                                 ))}
                             </div>
                         )}
+                        {cell.provider && (
+                            <p className="mt-2.5 text-[11px] text-ink-3" title={cell.fallbackNote || undefined}>
+                                Answered by {cell.provider}
+                                {cell.model && <> · <span className="font-mono">{cell.model}</span></>}
+                                {cell.fallbackNote && <span className="text-amber-700"> · backup used</span>}
+                            </p>
+                        )}
                     </div>
                 </div>
             </div>

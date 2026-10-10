@@ -136,6 +136,16 @@ def to_action(name: str, args: Optional[Dict[str, Any]]) -> Optional[Dict[str, A
     return {"tool": name, "arguments": args, "explanation": explanation}
 
 
+# Why a provider couldn't answer. The fallback chain uses these to decide what to do next.
+FAILURE_REASONS = ("quota", "busy", "auth", "config", "unreachable", "timeout", "error")
+
+
+def failure(message: str, reason: str) -> Dict[str, Any]:
+    """A reply meaning "this provider couldn't answer": a message for people plus a reason for code."""
+    assert reason in FAILURE_REASONS, reason
+    return {"response": message, "suggested_actions": [], "failure": reason}
+
+
 def finish(texts: List[str], actions: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Assemble the reply, with a fallback sentence when the model only made function calls."""
     text = "".join(texts).strip()

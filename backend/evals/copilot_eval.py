@@ -128,9 +128,6 @@ def runnable(session: DataSession, actions: Actions) -> bool:
     return True
 
 
-UNAVAILABLE_MARKERS = ("busy", "allowance", "isn't running", "took too long", "isn't downloaded", "Something went wrong")
-
-
 async def run_case(case: Case) -> Dict:
     session = case.setup()
     session.memory.append({"role": "user", "content": case.message})
@@ -138,37 +135,47 @@ async def run_case(case: Case) -> Dict:
     reply = await get_copilot_response(session, case.message)
     seconds = round(time.perf_counter() - started, 1)
     actions = reply["suggested_actions"]
-    unavailable = not actions and any(m in reply["response"] for m in UNAVAILABLE_MARKERS)
+    unavailable = bool(reply.get("failure"))
     return {
         "case": case.name,
         "seconds": seconds,
         "unavailable": unavailable,
+        "failure": reply.get("failure"),
         "correct": (not unavailable) and case.check(actions),
         "runnable": (not unavailable) and runnable(session, actions),
         "suggested": [(a["tool"], a["arguments"]) for a in actions],
+        "usage": reply.get("usage"),
         "reply": reply["response"][:200],
     }
 
 
+def _median(values):
+    values = [v for v in values if v is not None]
+    return float(pd.Series(values).median()) if values else None
+
+
+# Which setting holds each provider's model name
+MODEL_SETTING = {
+    "gemini": "GEMINI_MODEL", "ollama": "OLLAMA_MODEL", "openai_compatible": "AI_MODEL",
+    "groq": "GROQ_MODEL", "openrouter": "OPENROUTER_MODEL",
+}
+
+
 async def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--provider", choices=["gemini", "ollama", "openai_compatible"], default=settings.AI_PROVIDER)
+    parser.add_argument("--provider", choices=sorted(MODEL_SETTING), default=settings.AI_PROVIDER)
     parser.add_argument("--model", help="model name (defaults to the configured one)")
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--cases", help="comma-separated case names to run (default: all)")
+    parser.add_argument("--pause", type=float, default=0, help="seconds to wait between requests (rate limits)")
     opts = parser.parse_args()
 
-    settings.AI_PROVIDER = opts.provider
-    if opts.provider == "ollama":
-        settings.OLLAMA_MODEL = opts.model or settings.OLLAMA_MODEL
-        model = settings.OLLAMA_MODEL
-    elif opts.provider == "openai_compatible":
-        settings.AI_MODEL = opts.model or settings.AI_MODEL
-        model = settings.AI_MODEL
-    else:
-        settings.GEMINI_MODEL = opts.model or settings.GEMINI_MODEL
-        settings.GEMINI_FALLBACK_MODELS = ""  # judge one model at a time
-        model = settings.GEMINI_MODEL
+    # Judge exactly one provider and one model: no fallbacks
+    settings.AI_CHAIN = opts.provider
+    settings.GEMINI_FALLBACK_MODELS = ""
+    if opts.model:
+        setattr(settings, MODEL_SETTING[opts.provider], opts.model)
+    model = getattr(settings, MODEL_SETTING[opts.provider])
 
     chosen = [c for c in CASES if not opts.cases or c.name in opts.cases.split(",")]
     print(f"Evaluating {opts.provider}:{model} on {len(chosen)} cases x {opts.repeats}\n")
@@ -176,9 +183,11 @@ async def main():
     results = []
     for case in chosen:
         for i in range(opts.repeats):
+            if results and opts.pause:
+                await asyncio.sleep(opts.pause)
             r = await run_case(case)
             results.append(r)
-            status = "UNAVAILABLE" if r["unavailable"] else ("PASS" if r["correct"] else "FAIL")
+            status = f"UNAVAIL:{r['failure']}" if r["unavailable"] else ("PASS" if r["correct"] else "FAIL")
             run_flag = "" if r["unavailable"] else ("runnable" if r["runnable"] else "NOT RUNNABLE")
             print(f"{case.name:26} #{i + 1}  {status:11} {run_flag:12} {r['seconds']:6.1f}s  {r['suggested']}", flush=True)
 
@@ -192,11 +201,14 @@ async def main():
         "runnable_rate": round(sum(r["runnable"] for r in answered) / len(answered), 3) if answered else None,
         "median_seconds": float(pd.Series([r["seconds"] for r in answered]).median()) if answered else None,
         "unavailable_rate": round(1 - len(answered) / len(results), 3),
+        "median_input_tokens": _median([(r["usage"] or {}).get("input_tokens") for r in answered]),
+        "median_output_tokens": _median([(r["usage"] or {}).get("output_tokens") for r in answered]),
     }
     print("\nSUMMARY", json.dumps(summary, indent=2))
 
     RESULTS_DIR.mkdir(exist_ok=True)
-    path = RESULTS_DIR / f"{opts.provider}-{model.replace(':', '_')}-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    safe_model = "".join(ch if ch.isalnum() or ch in "-._" else "_" for ch in model)
+    path = RESULTS_DIR / f"{opts.provider}-{safe_model}-{time.strftime('%Y%m%d-%H%M%S')}.json"
     path.write_text(json.dumps({"summary": summary, "results": results}, indent=2), encoding="utf-8")
     print(f"Saved {path}")
 

@@ -1,3 +1,4 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Literal
 import os
@@ -22,6 +23,18 @@ class Settings(BaseSettings):
     AI_MODEL: str = ""
     AI_API_KEY: str = ""
     AI_TIMEOUT_SECONDS: float = 120
+
+    # Fallback chain: providers tried in order until one answers, e.g. "groq,gemini,ollama".
+    # Empty = use AI_PROVIDER alone.
+    AI_CHAIN: str = ""
+
+    # Groq (hosted, fast, free tier). Either name works for the key.
+    GROQ_API_KEY: str = Field("", validation_alias=AliasChoices("GROQ_API_KEY", "GROQ_KEY"))
+    GROQ_MODEL: str = "qwen/qwen3.8-27b"
+
+    # OpenRouter (hosted, many models incl. free ":free" variants)
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = "qwen/qwen3.6-27b:free"
 
     # Local models via Ollama
     OLLAMA_URL: str = "http://localhost:11434"

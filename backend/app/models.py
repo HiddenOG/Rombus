@@ -17,6 +17,12 @@ class ChatResponse(BaseModel):
     response: str
     suggested_actions: List[ToolCall]
     current_stage: str
+    # Which AI answered (provider and model), tokens used, and a note if the chain fell back
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    usage: Optional[Dict[str, Optional[int]]] = None
+    fallback_note: Optional[str] = None
+    failed: bool = False
 
 
 class ActionRequest(BaseModel):

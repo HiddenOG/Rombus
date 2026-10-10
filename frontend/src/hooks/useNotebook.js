@@ -156,7 +156,14 @@ export function useNotebook() {
         setCells(prev => [...prev, { id, type: 'ask', prompt, status: 'thinking' }]);
         try {
             const data = await api.sendChat(sessionId, prompt);
-            patchCell(id, { status: 'done', reply: data.response, suggestions: data.suggested_actions });
+            patchCell(id, {
+                status: data.failed ? 'error' : 'done',
+                reply: data.response,
+                suggestions: data.suggested_actions,
+                provider: data.provider,
+                model: data.model,
+                fallbackNote: data.fallback_note,
+            });
         } catch (err) {
             patchCell(id, { status: 'error', reply: err.message });
         }

@@ -11,6 +11,7 @@ from app.config import settings
 from app.copilot_prompt import (
     MAX_SUGGESTIONS,  # noqa: F401  (re-exported for tests)
     STATIC_INSTRUCTIONS,
+    failure,
     finish,
     recent_history,
     state_snapshot,
@@ -103,7 +104,7 @@ async def get_gemini_response(session: DataSession, user_message: str) -> dict:
     from google.genai import errors
 
     if not settings.GOOGLE_API_KEY:
-        return {"response": KEY_MESSAGE, "suggested_actions": []}
+        return failure(KEY_MESSAGE, "config")
 
     request = {
         "contents": build_contents(session, user_message),
@@ -114,24 +115,26 @@ async def get_gemini_response(session: DataSession, user_message: str) -> dict:
         },
     }
 
-    message = BUSY_MESSAGE
+    message, reason = BUSY_MESSAGE, "busy"
     for model in model_chain():
         try:
             response = await _get_client().aio.models.generate_content(model=model, **request)
-            return parse_response(response)
+            reply = parse_response(response)
+            reply["model"] = model
+            return reply
         except errors.APIError as e:
             logger.warning("Gemini model %s failed: %s %s", model, e.code, e.status)
             # Remember the most telling reason: "out of allowance" beats "busy"
             if e.code == 429:
-                message = QUOTA_MESSAGE
+                message, reason = QUOTA_MESSAGE, "quota"
             if e.code in (401, 403) or (e.code == 400 and "API key" in str(e)):
-                return {"response": KEY_MESSAGE, "suggested_actions": []}
+                return failure(KEY_MESSAGE, "auth")
             if e.code not in _SWITCH_MODEL_STATUSES:
-                message = GENERIC_MESSAGE
+                message, reason = GENERIC_MESSAGE, "error"
                 break
         except Exception:
             logger.exception("Gemini request failed with an unexpected error")
-            message = GENERIC_MESSAGE
+            message, reason = GENERIC_MESSAGE, "error"
             break
 
-    return {"response": message, "suggested_actions": []}
+    return failure(message, reason)
