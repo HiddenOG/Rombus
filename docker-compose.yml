@@ -1,19 +1,23 @@
-# AutoML Platform — Docker Compose
+# Run the whole app in containers, as it runs when deployed:  docker compose up --build
+# Then open http://localhost:3000
+#
+# Settings come from backend/.env (AI keys, Supabase); the lines below override the ones that
+# must be different on a shared server. Frontend build settings come from your shell or a root .env.
 
 services:
   backend:
     build: ./backend
-    ports:
-      - "8000:8000"
+    env_file: ./backend/.env
     environment:
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - API_SECRET_KEY=${API_SECRET_KEY:-}
-      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173
-      - SESSION_TTL_HOURS=24
+      - PORT=8000
+      - CORS_ORIGINS=http://localhost:3000
       # User-written code runs with full access to the server: never allow it on a shared deployment
       - ALLOW_CUSTOM_CODE=false
+      - RATE_LIMITS=true
+    ports:
+      - "8000:8000"
     volumes:
-      - backend_data:/app/data
+      - backend_data:/app/data   # only used when no Supabase database/storage is configured
     restart: unless-stopped
 
   frontend:
@@ -21,6 +25,10 @@ services:
       context: ./frontend
       args:
         VITE_API_URL: http://localhost:8000
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:-}
+    environment:
+      - PORT=3000
     ports:
       - "3000:3000"
     depends_on:

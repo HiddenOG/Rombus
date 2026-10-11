@@ -1,0 +1,36 @@
+server {
+    listen ${PORT};
+    root /usr/share/nginx/html;
+    index index.html;
+    server_tokens off;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+
+    # Security headers
+    #   CSP: scripts only from this site (so injected <script> tags can't run); the API, Supabase and
+    #   Google Fonts are the only outside places the page talks to.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https: http://localhost:*; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
+    # Built files have a content hash in their name: cache them for a year
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header X-Content-Type-Options "nosniff" always;
+        try_files $uri =404;
+    }
+
+    # The app itself: always check for a new version; unknown paths go to the app (it has one page).
+    # (The security headers are repeated here on purpose: in nginx, a location that adds any header
+    # of its own drops all the server-level ones.)
+    location / {
+        add_header Cache-Control "no-cache";
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https: http://localhost:*; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+        try_files $uri /index.html;
+    }
+}

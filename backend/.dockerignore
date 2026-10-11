@@ -1,0 +1,16 @@
+# Keep secrets, local data and dev-only files out of the image
+.env
+.env.*
+!.env.example
+venv/
+.venv/
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+evals/
+experiments/
+*.db
+*.parquet
+*.pkl

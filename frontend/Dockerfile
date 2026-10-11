@@ -1,41 +1,26 @@
-﻿# Frontend Dockerfile â€” Multi-stage Node build + Nginx
+# Frontend: build the React app, then serve the static files with nginx.
+# Works on Railway (which sets $PORT) and with docker compose.
 
-# Build stage
 FROM node:22-alpine AS builder
-
 WORKDIR /app
-
 COPY package.json package-lock.json ./
 RUN npm ci
-
 COPY . .
 
+# Public settings, baked into the app at build time (Railway passes service variables as build args).
+# Only public values belong here: anything in the frontend is visible to every visitor.
 ARG VITE_API_URL=http://localhost:8000
-ENV VITE_API_URL=$VITE_API_URL
-
+ARG VITE_SUPABASE_URL=
+ARG VITE_SUPABASE_PUBLISHABLE_KEY=
+ENV VITE_API_URL=$VITE_API_URL \
+    VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
+    VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY
 RUN npm run build
 
-# Production stage â€” Nginx
-FROM nginx:alpine
 
-# Copy custom nginx config
+FROM nginx:1.27-alpine
+# nginx fills ${PORT} into templates/*.template at startup
+ENV PORT=3000
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Nginx config for SPA routing
-RUN echo 'server { \
-    listen 3000; \
-    root /usr/share/nginx/html; \
-    index index.html; \
-    location / { \
-    try_files $uri $uri/ /index.html; \
-    } \
-    location /api/ { \
-    proxy_pass http://backend:8000; \
-    proxy_set_header Host $host; \
-    proxy_set_header X-Real-IP $remote_addr; \
-    } \
-    }' > /etc/nginx/conf.d/default.conf
-
 EXPOSE 3000
-
-CMD ["nginx", "-g", "daemon off;"]
