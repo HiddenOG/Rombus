@@ -198,9 +198,21 @@ class TestModelTools:
 
         select_target(sample_session, {"column": "Species"})
         do_train_test_split(sample_session, {"test_size": 0.3})
-        result = train_models(sample_session, {"algorithms": ["unknown_model"]})
-        assert result["success"]
-        assert "error" in result["evidence"]["results"][0]
+        result = train_models(sample_session, {"algorithms": ["unknown_model", "rf"]})
+        # Refused as a whole, naming the bad one and what's available (not a "success" that trained nothing)
+        assert not result["success"]
+        assert "unknown_model" in result["message"] and "rf" in result["message"]
+        assert not sample_session.trained_models
+
+    def test_train_accepts_long_algorithm_names(self, sample_session):
+        from app.tools.acquire import select_target
+        from app.tools.model import train_models
+
+        select_target(sample_session, {"column": "Species"})
+        result = train_models(sample_session, {"algorithms": ["Random Forest", "logistic_regression"]})
+        assert result["success"], result["message"]
+        assert set(sample_session.trained_models) == {"rf", "lr"}
+        assert "Trained 2 models" in result["message"]
 
 
 class TestWorkflowTools:

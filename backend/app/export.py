@@ -109,6 +109,8 @@ def apply_recipe(df, notes):
 def main(path={session.filename!r}):
     df = pd.read_csv(path) if path.endswith(".csv") else pd.read_excel(path)
     df = df.dropna(subset=[{target!r}])
+    if df[{target!r}].dtype.kind == "f" and (df[{target!r}] == df[{target!r}].round()).all():
+        df[{target!r}] = df[{target!r}].astype("int64")  # 0.0/1.0 back to 0/1 once the blanks are gone
     train, test = train_test_split(df, test_size={size}, random_state=42, stratify={stratify})
     train, test = train.reset_index(drop=True), test.reset_index(drop=True)
 

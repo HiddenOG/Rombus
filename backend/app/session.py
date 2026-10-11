@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import logging
 import pandas as pd
@@ -6,7 +7,9 @@ import uuid
 import os
 import json
 import time
-from typing import Dict, Optional, Any, List
+from collections import OrderedDict, defaultdict
+from typing import Callable, Dict, Optional, Any, List, TypeVar
+from starlette.concurrency import run_in_threadpool
 from app.config import settings
 from app.recipe import STEP_TYPES, Context, Line, apply_to, run_line
 from app.recipe_code import step_code
@@ -14,6 +17,17 @@ from app.code_checks import peeking_warnings
 from app.storage import Database, FileStore, database_url, file_store
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+def whole_number_target(df: pd.DataFrame, target: str) -> pd.DataFrame:
+    """One blank in a column of 0s and 1s makes pandas store it as 0.0 and 1.0. Once the blank
+    rows are gone, turn it back into whole numbers, so predictions read "1", not "1.0"."""
+    y = df[target]
+    if pd.api.types.is_float_dtype(y) and len(y) and np.isfinite(y).all() and (y == y.round()).all():
+        df = df.assign(**{target: y.astype("int64")})
+    return df
 
 
 class DataSession:
@@ -257,7 +271,7 @@ class DataSession:
     def _split(self, test_size: float) -> int:
         from sklearn.model_selection import train_test_split
 
-        full = self.original_df.dropna(subset=[self.target_column])
+        full = whole_number_target(self.original_df.dropna(subset=[self.target_column]), self.target_column)
         dropped = len(self.original_df) - len(full)
         y = full[self.target_column]
 
@@ -291,18 +305,20 @@ class DataSession:
             "missing_ratio": float(series.isnull().mean()),
             "unique_count": int(series.nunique()),
         }
-        if pd.api.types.is_numeric_dtype(series):
-            clean = series.dropna()
+        if pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series):
+            clean = series.dropna().astype(float)
+            clean = clean[np.isfinite(clean)]
             if not clean.empty:
                 from scipy import stats as sp_stats
+                spread = float(clean.std(ddof=0))
+                # A column holding one value has no shape: skew and outliers are 0, not NaN
+                # (NaN can't be sent as JSON and would crash the reply)
+                varied = spread > 0 and len(clean) > 2
                 evidence.update({
                     "mean": round(float(clean.mean()), 4),
-                    "std": round(float(clean.std()), 4),
-                    "skewness": round(float(sp_stats.skew(clean)), 4),
-                    "outlier_ratio": round(
-                        float(len(clean[np.abs(sp_stats.zscore(clean)) > 3]) / len(clean))
-                        if len(clean) > 0 else 0, 4
-                    ),
+                    "std": round(float(clean.std()) if len(clean) > 1 else 0.0, 4),
+                    "skewness": round(float(sp_stats.skew(clean)), 4) if varied else 0.0,
+                    "outlier_ratio": round(float((np.abs((clean - clean.mean()) / spread) > 3).mean()), 4) if varied else 0.0,
                 })
         return evidence
 
@@ -352,7 +368,8 @@ class SessionManager:
     """Keeps sessions in memory and saves them through the storage layer (app/storage.py)."""
 
     def __init__(self):
-        self._sessions: Dict[str, DataSession] = {}
+        # Most recently used last. Only MAX_SESSIONS_IN_MEMORY stay loaded; the rest wait in storage.
+        self._sessions: "OrderedDict[str, DataSession]" = OrderedDict()
         self._db: Optional[Database] = None
         self._files: Optional[FileStore] = None
         # The table last saved under each file key. The data tables are only ever replaced, never
@@ -372,18 +389,32 @@ class SessionManager:
         """Create a new session and persist it."""
         session = DataSession(df, filename)
         session.owner = owner
-        self._sessions[session.session_id] = session
         self._persist_session(session)
+        self._remember(session)
         return session
 
     def get_session(self, session_id: str) -> Optional[DataSession]:
         """Retrieve a session from memory, or rebuild it from storage."""
         if session_id in self._sessions:
+            self._sessions.move_to_end(session_id)
             return self._sessions[session_id]
         session = self._load_session(session_id)
         if session:
-            self._sessions[session_id] = session
+            self._remember(session)
         return session
+
+    def _remember(self, session: DataSession) -> None:
+        """Keep a notebook in memory, unloading the least recently used ones past the limit.
+        Unloaded notebooks are safe in storage and reload when opened (trained models, which
+        live only in memory, need training again). Never unloads one that's busy."""
+        self._sessions[session.session_id] = session
+        self._sessions.move_to_end(session.session_id)
+        for sid in list(self._sessions):
+            if len(self._sessions) <= settings.MAX_SESSIONS_IN_MEMORY:
+                break
+            if sid != session.session_id and not _notebook_locks[sid].locked():
+                del self._sessions[sid]
+                self._saved_files = {k: v for k, v in self._saved_files.items() if not k.startswith(sid)}
 
     def _save_or_delete(self, key: str, df: Optional[pd.DataFrame]) -> None:
         if df is None:
@@ -524,3 +555,18 @@ class SessionManager:
 
 # Global session manager instance
 session_manager = SessionManager()
+
+
+_notebook_locks: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+
+async def run_exclusive(session_id: str, fn: Callable[..., T], *args: Any) -> T:
+    """Run blocking work for one notebook (training, replaying the recipe, saving to the cloud)
+    on a worker thread, one request at a time per notebook.
+
+    Worker thread: the server keeps answering everyone else while this notebook works.
+    One at a time: two requests (say, training and a cells autosave) never change the same
+    notebook at once.
+    """
+    async with _notebook_locks[session_id]:
+        return await run_in_threadpool(fn, *args)

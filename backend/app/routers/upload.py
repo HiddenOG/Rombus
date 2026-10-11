@@ -4,6 +4,7 @@ import io
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from app.access import current_owner, limit
 from app.config import settings
@@ -24,11 +25,16 @@ async def upload_file(file: UploadFile = File(...), visitor: str = Depends(curre
     contents = await file.read()
     if len(contents) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise HTTPException(status_code=413, detail=f"File too large. Maximum size: {settings.MAX_UPLOAD_SIZE_MB} MB.")
+    # Reading the table and saving it to storage are slow: do them on a worker thread
+    return await run_in_threadpool(_create_notebook, contents, name, visitor)
 
+
+def _create_notebook(contents: bytes, name: str, visitor: str):
     try:
         df = pd.read_excel(io.BytesIO(contents)) if name.lower().endswith((".xlsx", ".xls")) else pd.read_csv(io.BytesIO(contents))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Couldn't read that file as a table: {e}")
+        reason = str(e).splitlines()[0][:200] if str(e) else type(e).__name__
+        raise HTTPException(status_code=400, detail=f"Couldn't read that file as a table: {reason}")
 
     if df.empty:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")

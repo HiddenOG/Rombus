@@ -75,7 +75,7 @@ def test_flags_a_model_that_only_guesses_the_common_answer():
     run(s, "train_models", algorithms=["lr"])
     result = run(s, "final_exam")
     assert result["evidence"]["exam"]["no_better_than_guessing"]
-    assert "no better than just guessing" in result["message"]
+    assert "no better than the baseline" in result["message"]
 
 
 def test_prediction_form_fields_come_from_raw_training_rows(churn):

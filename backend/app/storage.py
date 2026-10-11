@@ -107,12 +107,14 @@ class Database:
         return dict(row) if row else None
 
     def recent(self, limit: int, owner: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Most recent notebooks of `owner`, plus unowned ones from before owners existed."""
+        """Most recent notebooks of `owner` (all notebooks when owner is None, for maintenance scripts).
+        Unowned notebooks from before owners existed are never listed to visitors: on a shared
+        server that would show them to everyone."""
         t = sessions_table
         query = (select(t.c.session_id, t.c.filename, t.c.target_column, t.c.current_stage, t.c.updated_at)
                  .order_by(t.c.updated_at.desc()).limit(limit))
         if owner is not None:
-            query = query.where((t.c.owner == owner) | (t.c.owner.is_(None)))
+            query = query.where(t.c.owner == owner)
         with self.engine.connect() as conn:
             return [dict(r) for r in conn.execute(query).mappings()]
 

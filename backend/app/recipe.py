@@ -305,15 +305,31 @@ def _label_codes(df: pd.DataFrame, col: str, classes: List[str]) -> pd.Series:
 
 
 def _onehot(df: pd.DataFrame, col: str, classes: List[str]) -> pd.DataFrame:
-    values = df[col].astype(str)
-    for c in classes:
-        df[f"{col}_{c}"] = (values == c).astype(int)
-    return df.drop(columns=[col])
+    values = df[col].astype(str).where(df[col].notna())
+    columns = pd.DataFrame({f"{col}_{c}": (values == c).astype(int) for c in classes}, index=df.index)
+    return pd.concat([df.drop(columns=[col]), columns], axis=1)
+
+
+# One-hot makes one new column per category. Past this many, it's almost always an ID, a name or
+# free text (one column per passenger teaches the model nothing), and it can run the server out of memory.
+MAX_ONEHOT_CATEGORIES = 30
 
 
 def _check_encoding(method: str) -> None:
     if method not in ("label", "onehot"):
         raise ValueError(f"Unknown encoding method '{method}'. Use 'label' or 'onehot'.")
+
+
+def _check_onehot_size(classes: Dict[str, List[str]]) -> None:
+    too_many = {col: len(c) for col, c in classes.items() if len(c) > MAX_ONEHOT_CATEGORIES}
+    if too_many:
+        listed = ", ".join(f"'{col}' ({n} different values)" for col, n in too_many.items())
+        raise ValueError(
+            f"One-hot encoding would add one column per value, and {listed} "
+            f"{'has' if len(too_many) == 1 else 'have'} more than {MAX_ONEHOT_CATEGORIES}. Columns like that are "
+            "usually IDs, names or free text, which don't help a model generalise. Remove "
+            f"{'it' if len(too_many) == 1 else 'them'} first, clean it into a number if it's really numeric "
+            "(e.g. prices stored as text), or use label encoding.")
 
 
 @step_type("encode_categorical")
@@ -323,7 +339,10 @@ class EncodeCategorical(Step):
     def learn(self, train):
         col = self._require_column(train, self.args.get("column"))
         _check_encoding(self.args.get("method", "label"))
-        return {"classes": {col: _categories(train[col])}}
+        classes = {col: _categories(train[col])}
+        if self.args.get("method", "label") == "onehot":
+            _check_onehot_size(classes)
+        return {"classes": classes}
 
     def apply(self, df, learned):
         method = self.args.get("method", "label")
@@ -349,7 +368,10 @@ class EncodeAllCategorical(Step):
         from app.tools import categorical_columns
         _check_encoding(self.args.get("method", "label"))
         cols = [c for c in categorical_columns(train) if c != self.ctx.target]
-        return {"classes": {c: _categories(train[c]) for c in cols}}
+        classes = {c: _categories(train[c]) for c in cols}
+        if self.args.get("method", "label") == "onehot":
+            _check_onehot_size(classes)
+        return {"classes": classes}
 
     apply = EncodeCategorical.apply
 

@@ -43,7 +43,8 @@ CODE_SPEC = {"type": "string", "format": "code", "description": "Python code."}
     ai=False,
 )
 def custom_view(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
-    run = run_user_code(args.get("code") or "", {"train": session.df.copy()})
+    rows = session.df.copy()
+    run = run_user_code(args.get("code") or "", {"train": rows, "df": rows})  # df: the name pandas habit reaches for
     evidence = result_evidence(run.namespace.get("result"))
     if run.output:
         evidence["output"] = (evidence.get("output", "") + "\n" + run.output).strip()

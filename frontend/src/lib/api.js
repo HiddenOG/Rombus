@@ -35,6 +35,17 @@ async function identity() {
     return { 'X-Visitor-Id': visitorId(), ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 }
 
+/** A readable message from an error reply. Validation errors (422) carry a list, not a sentence. */
+function errorText(data, status) {
+    const { detail } = data || {};
+    if (Array.isArray(detail)) {
+        return detail.map(d => d.msg?.replace(/^Value error, /, '') || String(d)).join(' ');
+    }
+    if (status === 413) return detail || 'That request is too large.';
+    if (status === 429) return detail || "You're going a bit fast. Please wait a moment.";
+    return detail || data?.message || `HTTP ${status}`;
+}
+
 /**
  * Make an API request with standard error handling.
  */
@@ -52,10 +63,10 @@ async function apiRequest(endpoint, options = {}) {
 
     try {
         const response = await fetch(url, { ...options, headers });
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
 
         if (!response.ok) {
-            throw new Error(data.detail || data.message || `HTTP ${response.status}`);
+            throw new Error(errorText(data, response.status));
         }
 
         return data;
@@ -118,7 +129,7 @@ export async function downloadExport(sessionId, what, format = 'csv') {
     });
     if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        throw new Error(data.detail || `Export failed (HTTP ${response.status})`);
+        throw new Error(errorText(data, response.status));
     }
     const name = /filename="([^"]+)"/.exec(response.headers.get('content-disposition') || '')?.[1] || 'export';
     const url = URL.createObjectURL(await response.blob());

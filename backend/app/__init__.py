@@ -1,10 +1,13 @@
 import asyncio
 import contextlib
+import json
 import logging
+import math
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.routers import upload, chat, action, health, recipe, account
@@ -39,13 +42,54 @@ async def lifespan(app: FastAPI):
             await cleanup
 
 
+def _finite(value):
+    """NaN and infinity become None: JSON has no way to write them."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {k: _finite(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite(v) for v in value]
+    return value
+
+
+class SafeJSONResponse(JSONResponse):
+    """A safety net: one NaN anywhere in a reply (say, a statistic of an all-blank column) would
+    otherwise crash the whole response."""
+
+    def render(self, content) -> bytes:
+        try:
+            return json.dumps(content, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+        except ValueError:
+            return json.dumps(_finite(content), ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+
+
+class BodySizeLimit:
+    """Refuse oversized requests before reading them: uploads up to MAX_UPLOAD_SIZE_MB,
+    everything else (chat, cells, settings) up to 2 MB. Stops one visitor filling memory or storage."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            length = dict(scope["headers"]).get(b"content-length")
+            cap = (settings.MAX_UPLOAD_SIZE_MB + 1) * 1024 * 1024 if scope["path"].endswith("/upload") else 2 * 1024 * 1024
+            if length and length.isdigit() and int(length) > cap:
+                response = JSONResponse({"detail": f"Request too large (limit {cap // (1024 * 1024)} MB)."}, status_code=413)
+                return await response(scope, receive, send)
+        return await self.app(scope, receive, send)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="AutoML Platform — AI Data Science Copilot",
         version="3.0",
         description="AI-powered interactive data science copilot following the ASEMIC workflow.",
         lifespan=lifespan,
+        default_response_class=SafeJSONResponse,
     )
+    app.add_middleware(BodySizeLimit)
 
     # CORS: only the configured sites may call the API. No cookies are used (owners are identified
     # by the Authorization and X-Visitor-Id headers), so credentials stay off.

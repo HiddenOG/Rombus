@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Download, ChevronDown, FileSpreadsheet, Table2, FileCode2 } from 'lucide-react';
+import { Download, ChevronDown, FileSpreadsheet, Table2, FileCode2, Boxes } from 'lucide-react';
 import { downloadExport } from '../lib/api';
 
 /**
@@ -10,6 +10,7 @@ export function ExportMenu({ nb }) {
     const [busy, setBusy] = useState(false);
     const ref = useRef(null);
     const locked = Boolean(nb.summary?.is_split);
+    const trained = Boolean(nb.summary?.trained_models?.length);
     const disabled = !nb.sessionId || nb.isProcessing || busy;
 
     useEffect(() => {
@@ -44,6 +45,12 @@ export function ExportMenu({ nb }) {
             text: 'Your whole recipe as one runnable .py file: split, learn, apply, save. Reproduces this notebook.',
             onClick: download('script'),
         },
+        {
+            icon: Boxes, label: 'Trained model (.pkl)', disabled: !trained,
+            hint: 'Train a model first.',
+            text: 'The best model, plus the recipe and its sticky notes to prepare new rows. Load it with pickle.',
+            onClick: download('model'),
+        },
     ];
 
     return (
@@ -62,7 +69,7 @@ export function ExportMenu({ nb }) {
             </button>
             {open && (
                 <div role="menu" className="absolute right-0 top-full z-30 mt-1.5 w-80 max-w-[90vw] rounded-xl border border-line bg-surface p-1.5 shadow-lg animate-in">
-                    {items.map(({ icon: Icon, label, text, onClick, disabled: off }) => (
+                    {items.map(({ icon: Icon, label, text, hint = 'Choose the target first.', onClick, disabled: off }) => (
                         <button
                             key={label}
                             role="menuitem"
@@ -73,7 +80,7 @@ export function ExportMenu({ nb }) {
                             <Icon className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
                             <span>
                                 <span className="block text-sm font-semibold text-ink">{label}</span>
-                                <span className="block text-xs leading-relaxed text-ink-3">{off ? 'Choose the target first.' : text}</span>
+                                <span className="block text-xs leading-relaxed text-ink-3">{off ? hint : text}</span>
                             </span>
                         </button>
                     ))}

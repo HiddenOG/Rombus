@@ -189,6 +189,7 @@ function CommandBar({ nb }) {
                         value={text}
                         onChange={e => setText(e.target.value)}
                         placeholder={sessionId ? 'Ask the copilot about your data…' : 'Upload a dataset to start'}
+                        maxLength={4000}
                         disabled={!sessionId || isProcessing}
                         className="min-w-0 flex-1 bg-transparent py-2 text-base text-ink outline-none placeholder:text-ink-3 disabled:cursor-not-allowed sm:text-[15px]"
                     />

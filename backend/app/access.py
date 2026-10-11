@@ -23,6 +23,7 @@ from typing import Deque, Dict, Optional
 
 import jwt
 from fastapi import Depends, Header, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
 from app.session import DataSession, session_manager
@@ -84,6 +85,12 @@ def owned_session(session_id: str, visitor: str = Depends(current_owner)) -> Dat
     return session
 
 
+async def load_owned(session_id: str, visitor: str) -> DataSession:
+    """owned_session on a worker thread: opening a notebook that isn't in memory means downloading
+    it from storage and replaying its recipe, which shouldn't hold up everyone else's requests."""
+    return await run_in_threadpool(owned_session, session_id, visitor)
+
+
 # ── Usage limits ─────────────────────────────────────────────────────────────────
 
 _events: Dict[str, Deque[float]] = defaultdict(deque)
@@ -102,31 +109,42 @@ def _hit(key: str, limit: int, window_seconds: float) -> bool:
 
 
 def client_address(request: Request) -> str:
-    # Behind a hosting proxy (e.g. Railway) the visitor's address is the first X-Forwarded-For entry
-    forwarded = request.headers.get("x-forwarded-for", "")
-    return forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    """The visitor's network address. Behind a hosting proxy (e.g. Railway) it's in X-Forwarded-For.
+    Use the LAST entry: that's the one our proxy added. Earlier entries come from the visitor, who
+    could write anything there to dodge the per-address limit."""
+    forwarded = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",") if part.strip()]
+    return forwarded[-1] if forwarded else (request.client.host if request.client else "unknown")
+
+
+# kind: (setting with the allowance, window in seconds, unit, what's being counted)
+LIMITS = {
+    "ai": ("AI_PER_MINUTE", 60, "minute", "AI messages"),
+    "upload": ("UPLOADS_PER_HOUR", 3600, "hour", "uploads"),
+    "compute": ("TRAININGS_PER_HOUR", 3600, "hour", "training runs"),
+}
+
+
+def enforce(kind: str, request: Request, visitor: str) -> None:
+    """Per-owner, per-address (3x) and, for AI, daily total limits. Raises 429 when exceeded."""
+    if not settings.RATE_LIMITS:
+        return
+    setting, window, unit, what = LIMITS[kind]
+    allowed = getattr(settings, setting)  # read on every request, so changes apply without a restart
+    message = None
+    if not _hit(f"{kind}:visitor:{visitor}", allowed, window):
+        message = f"You're going a bit fast: at most {allowed} {what} per {unit}."
+    elif not _hit(f"{kind}:ip:{client_address(request)}", allowed * 3, window):
+        message = "Too many requests from your network. Please wait a moment."
+    elif kind == "ai" and not _hit("ai:daily", settings.AI_DAILY_LIMIT, 86400):
+        message = "The demo's AI allowance for today is used up. You can still add steps yourself with Add step."
+    if message:
+        raise HTTPException(status_code=429, detail=message)
 
 
 def limit(kind: str):
-    """A dependency enforcing the per-visitor, per-address (3x) and, for AI, daily total limits."""
-    window = {"ai": 60, "upload": 3600}[kind]
-    unit = {"ai": "minute", "upload": "hour"}[kind]
-
+    """The same limits as a route dependency."""
     def check(request: Request, visitor: str = Depends(current_owner)) -> None:
-        if not settings.RATE_LIMITS:
-            return
-        # Read the limits on every request, so changed settings apply without a restart
-        per_minute = {"ai": settings.AI_PER_MINUTE, "upload": settings.UPLOADS_PER_HOUR}[kind]
-        message = None
-        if not _hit(f"{kind}:visitor:{visitor}", per_minute, window):
-            message = f"You're going a bit fast: at most {per_minute} {'AI messages' if kind == 'ai' else 'uploads'} per {unit}."
-        elif not _hit(f"{kind}:ip:{client_address(request)}", per_minute * 3, window):
-            message = "Too many requests from your network. Please wait a moment."
-        elif kind == "ai" and not _hit("ai:daily", settings.AI_DAILY_LIMIT, 86400):
-            message = "The demo's AI allowance for today is used up. You can still add steps yourself with Add step."
-        if message:
-            raise HTTPException(status_code=429, detail=message)
-
+        enforce(kind, request, visitor)
     return check
 
 

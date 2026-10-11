@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     AI_PER_MINUTE: int = 10          # copilot messages per visitor per minute
     AI_DAILY_LIMIT: int = 500        # copilot messages per day, all visitors together
     UPLOADS_PER_HOUR: int = 20       # uploads per visitor per hour
+    TRAININGS_PER_HOUR: int = 60     # model training / AutoML / explanation runs per visitor per hour
 
     # Upload limits
     MAX_UPLOAD_SIZE_MB: int = 20
@@ -71,6 +72,9 @@ class Settings(BaseSettings):
     # Delete notebooks unused for this many hours (0 = keep forever, the right choice on your own laptop;
     # a public demo should set e.g. 72 so its disk doesn't fill up)
     SESSION_TTL_HOURS: int = 0
+    # Notebooks kept loaded in memory (most recently used); the rest wait in storage. Each can hold
+    # a dataset of up to MAX_ROWS rows, so this caps the server's memory use.
+    MAX_SESSIONS_IN_MEMORY: int = 30
 
     # Accounts (Supabase Auth). Your project's URL, e.g. https://abcd.supabase.co. No secret needed:
     # login tokens are checked with the public key Supabase publishes. Empty = anonymous visitors only.

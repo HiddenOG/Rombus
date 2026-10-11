@@ -4,8 +4,7 @@ import copy
 import pandas as pd
 import numpy as np
 import pickle
-import os
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
 from sklearn.ensemble import (
@@ -24,7 +23,6 @@ from sklearn.metrics import (
 
 from app.tools import register_tool, validate_column, categorical_columns
 from app.session import DataSession
-from app.config import settings
 
 
 # --- Algorithm Registry ---
@@ -78,6 +76,17 @@ AUTOML_REGRESSION_GRIDS = {
     },
 }
 
+
+# Long names people (and AI models) naturally write, mapped to the short keys above
+ALGORITHM_ALIASES = {
+    "random_forest": "rf", "randomforest": "rf",
+    "gradient_boosting": "gb", "gradientboosting": "gb", "gbm": "gb", "xgboost": "gb",
+    "logistic_regression": "lr", "logisticregression": "lr", "logistic": "lr",
+    "decision_tree": "dt", "decisiontree": "dt", "tree": "dt",
+    "k_nearest_neighbors": "knn", "nearest_neighbors": "knn", "kneighbors": "knn",
+    "svm": "svc", "support_vector_machine": "svc",
+    "ridge_regression": "ridge", "lasso_regression": "lasso",
+}
 
 ALGORITHM = {
     "type": "string",
@@ -197,7 +206,9 @@ def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str,
     y = session.df[session.target_column]
     object_cols = categorical_columns(session.df.drop(columns=[session.target_column]))
 
-    stratify_param = y if stratify and session.problem_type == "classification" else None
+    # Stratifying needs at least 2 rows of every class; with a rarer class, split without it
+    can_stratify = session.problem_type == "classification" and y.value_counts().min() >= 2
+    stratify_param = y if stratify and can_stratify else None
 
     session.X_train, session.X_test, session.y_train, session.y_test = train_test_split(
         X, y, test_size=test_size, random_state=42, stratify=stratify_param
@@ -230,23 +241,20 @@ def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str,
 )
 def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Train one or more ML models (doing the practice split first if it hasn't happened)."""
-    auto_split = ensure_practice_split(session)
-
-    alg_names = args.get("algorithms", ["rf", "gb"])
-    cv_folds = safe_cv_folds(session, args.get("cv_folds", 5))
-
     model_registry = CLASSIFICATION_MODELS if session.problem_type == "classification" else REGRESSION_MODELS
-    results = []
+    alg_names = [ALGORITHM_ALIASES.get(str(a).lower().replace(" ", "_"), str(a).lower()) for a in args.get("algorithms", ["rf", "gb"])]
+    unknown = [a for a in alg_names if a not in model_registry]
+    if unknown:
+        return {"success": False,
+                "message": f"Unknown algorithm{'s' if len(unknown) > 1 else ''} for {session.problem_type}: "
+                           f"{', '.join(unknown)}. Available: {', '.join(model_registry)}."}
 
-    for alg in alg_names:
-        if alg not in model_registry:
-            available = ", ".join(model_registry.keys())
-            results.append({"model": alg, "error": f"Unknown algorithm. Available: {available}"})
-            continue
-        results.append(fit_and_score(session, alg, model_registry[alg](), cv_folds))
+    auto_split = ensure_practice_split(session)
+    cv_folds = safe_cv_folds(session, args.get("cv_folds", 5))
+    results = [fit_and_score(session, alg, model_registry[alg](), cv_folds) for alg in dict.fromkeys(alg_names)]
 
     best = finish_training(session, results)
-    msg = f"Trained {len(alg_names)} models. Best on the practice split: {best}."
+    msg = f"Trained {len(results)} model{'s' if len(results) != 1 else ''}. Best on the practice split: {best}."
     if auto_split:
         msg = f"{auto_split} {msg}"
     if best:
@@ -265,46 +273,46 @@ def auto_ml(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
 
     grids = AUTOML_CLASSIFICATION_GRIDS if session.problem_type == "classification" else AUTOML_REGRESSION_GRIDS
     scoring = "accuracy" if session.problem_type == "classification" else "r2"
+    folds = safe_cv_folds(session, 3)
 
     results = []
-    best_score = -float('inf')
-    best_model_name = None
-
     for name, config in grids.items():
         try:
-            grid_search = GridSearchCV(
-                config["model"], config["params"],
-                cv=3, scoring=scoring, n_jobs=-1, error_score='raise'
-            )
+            # n_jobs=1: on a shared server, one person's search mustn't take every CPU core
+            grid_search = GridSearchCV(clone(config["model"]), config["params"],
+                                       cv=folds, scoring=scoring, n_jobs=1, error_score="raise")
             grid_search.fit(session.X_train, session.y_train)
-
-            best_estimator = grid_search.best_estimator_
-            y_pred = best_estimator.predict(session.X_test)
-
-            if session.problem_type == "regression":
-                score = round(float(r2_score(session.y_test, y_pred)), 4)
-                result = {"model": name, "best_params": grid_search.best_params_,
-                         "r2_score": score, "cv_best_score": round(float(grid_search.best_score_), 4)}
-            else:
-                acc = round(float(accuracy_score(session.y_test, y_pred)), 4)
-                result = {"model": name, "best_params": grid_search.best_params_,
-                         "accuracy": acc, "cv_best_score": round(float(grid_search.best_score_), 4)}
-
-            session.trained_models[name] = best_estimator
-            results.append(result)
-
-            if grid_search.best_score_ > best_score:
-                best_score = grid_search.best_score_
-                best_model_name = name
-
         except Exception as e:
-            results.append({"model": name, "error": str(e)})
+            results.append({"model": name, "error": str(e).splitlines()[0][:200]})
+            continue
 
-    return {
-        "success": True,
-        "message": f"AutoML complete. Best model: {best_model_name} (CV score: {best_score:.4f}).",
-        "evidence": {"results": results, "best_model": best_model_name},
-    }
+        best_estimator = grid_search.best_estimator_
+        y_pred = best_estimator.predict(session.X_test)
+        cv = round(float(grid_search.best_score_), 4)
+        result = {"model": name, "best_params": grid_search.best_params_, "cv_best_score": cv,
+                  # cv_mean: the score every later step (explain, predict, final exam) ranks models by
+                  "cv_mean": cv, "cv_std": round(float(grid_search.cv_results_["std_test_score"][grid_search.best_index_]), 4)}
+        if session.problem_type == "regression":
+            result["r2_score"] = round(float(r2_score(session.y_test, y_pred)), 4)
+        else:
+            result["accuracy"] = round(float(accuracy_score(session.y_test, y_pred)), 4)
+
+        session.trained_models[name] = best_estimator
+        session.model_results[name] = result
+        results.append(result)
+
+    best = finish_training(session, results)
+    if best is None:
+        return {"success": False,
+                "message": "AutoML couldn't fit any model: " + "; ".join(f"{r['model']}: {r['error']}" for r in results)}
+    overall = best_model_name(session)
+    msg = f"AutoML complete. Best tuned model: {best} (CV score: {session.model_results[best]['cv_mean']:.4f})."
+    if overall == best:
+        msg += " It's now the default for explain, predict and the final exam."
+    else:
+        msg += (f" Your earlier '{overall}' still has the best practice score "
+                f"({session.model_results[overall]['cv_mean']:.4f}), so it stays the default.")
+    return {"success": True, "message": msg, "evidence": {"results": results, "best_model": best}}
 
 
 @register_tool(
@@ -384,8 +392,9 @@ def final_exam(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         f"(baseline, {exam['baseline_label']}: {exam['baseline']})."
     )
     if exam["no_better_than_guessing"]:
-        msg += (" Warning: the model is no better than just guessing, so the score looks good only because one "
-                "answer is common. Try other models, more informative columns, or balancing the classes.")
+        msg += (f" Warning: the model did no better than the baseline ({exam['baseline_label']}), so it hasn't "
+                "learned anything useful yet. Try other models, more informative columns, or more data"
+                + (", or balancing the classes." if session.problem_type == "classification" else "."))
     if exam["practice"] is not None and exam["practice"] - exam["score"] > 0.05:
         msg += f" That's well below the practice score ({exam['practice']}): the model may be overfitting."
     if session.exam_count > 1:
@@ -523,31 +532,31 @@ def explain_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": False, "message": f"Could not explain model: {str(e)}"}
 
 
-@register_tool("save_model", "Save a trained model (with its preprocessing) to disk.", {"algorithm": ALGORITHM}, kind="action")
-def save_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Save a trained model to disk."""
+def model_bundle(session: DataSession, model_name: Optional[str] = None) -> Tuple[str, bytes]:
+    """A trained model with everything needed to use it, as a pickle file to download:
+    the model, the recipe with its sticky notes (to prepare new rows), and the feature names."""
     if not session.trained_models:
-        return {"success": False, "message": "No trained models to save."}
-
-    model_name = args.get("algorithm") or best_model_name(session)
+        raise ValueError("No trained models yet. Train a model first.")
+    model_name = model_name or best_model_name(session)
     if model_name not in session.trained_models:
-        return {"success": False, "message": f"Model '{model_name}' not found."}
+        raise ValueError(f"Model '{model_name}' not found. Trained: {', '.join(session.trained_models)}.")
+    return model_name, pickle.dumps({
+        "model": session.trained_models[model_name],
+        # The recipe with its sticky notes: replay with app.recipe.apply_to before predicting
+        "recipe": [{"tool": l.tool, "args": l.args, "learned": l.learned} for l in session.recipe],
+        "target": session.target_column,
+        "problem_type": session.problem_type,
+        "feature_names": session.X_train.columns.tolist() if session.X_train is not None else [],
+    })
 
-    save_dir = os.path.join(settings.DATA_DIR, "models")
-    os.makedirs(save_dir, exist_ok=True)
 
-    path = os.path.join(save_dir, f"model_{model_name}_{session.session_id[:8]}.pkl")
-    with open(path, 'wb') as f:
-        pickle.dump({
-            'model': session.trained_models[model_name],
-            # The recipe with its sticky notes: replay with app.recipe.apply_to before predicting
-            'recipe': [{"tool": l.tool, "args": l.args, "learned": l.learned} for l in session.recipe],
-            'target': session.target_column,
-            'problem_type': session.problem_type,
-            'feature_names': session.X_train.columns.tolist() if session.X_train is not None else [],
-        }, f)
-
+@register_tool("save_model", "Prepare a trained model (with its preprocessing) for download.", {"algorithm": ALGORITHM}, kind="action")
+def save_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Check the model can be packaged; the file itself is downloaded from the Export menu
+    (it goes to the person's computer, never onto the server's disk)."""
+    model_name, _ = model_bundle(session, args.get("algorithm"))
     return {
         "success": True,
-        "message": f"Model '{model_name}' saved to {path}.",
+        "message": f"Model '{model_name}' is ready: download it from Export → Trained model (.pkl). "
+                   "It includes the recipe, so new rows can be prepared exactly like the training rows.",
     }

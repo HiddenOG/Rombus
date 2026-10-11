@@ -1,21 +1,28 @@
 """Action router — tool execution endpoint."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
-from app.access import current_owner, owned_session
+from app.access import current_owner, enforce, load_owned
 from app.models import ActionRequest, ActionResponse
-from app.session import session_manager
+from app.session import DataSession, run_exclusive, session_manager
 from app.tools import execute_tool
 
 router = APIRouter()
 
+# Tools that keep the CPU busy for seconds (or minutes): counted against TRAININGS_PER_HOUR
+HEAVY_TOOLS = {"train_models", "auto_ml", "explain_model", "custom_models", "final_exam"}
+
 
 @router.post("/action", response_model=ActionResponse)
-async def execute_action(request: ActionRequest, visitor: str = Depends(current_owner)):
+async def execute_action(request: ActionRequest, http: Request, visitor: str = Depends(current_owner)):
     """Execute a data science tool/action."""
-    session = owned_session(request.session_id, visitor)
+    session = await load_owned(request.session_id, visitor)
+    if request.tool in HEAVY_TOOLS:
+        enforce("compute", http, visitor)
+    return await run_exclusive(session.session_id, _run, session, request)
 
-    # Execute the tool
+
+def _run(session: DataSession, request: ActionRequest) -> ActionResponse:
     session.models_cleared = False
     result = execute_tool(request.tool, session, request.arguments)
 
@@ -41,6 +48,9 @@ async def execute_action(request: ActionRequest, visitor: str = Depends(current_
         "role": "assistant",
         "content": f"Action Executed: {request.tool}. Result: {result['message']}",
     })
+    session.memory = session.memory[-20:]
+    session.workflow_log = session.workflow_log[-50:]
+    session.completed_steps = session.completed_steps[-100:]
 
     # Persist session
     session_manager.save(session)

@@ -1,10 +1,11 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 
 
 class ChatRequest(BaseModel):
     session_id: str
-    message: str
+    # Long enough for any real question; stops one message using up the AI allowance
+    message: str = Field(min_length=1, max_length=4000)
 
 
 class ToolCall(BaseModel):
