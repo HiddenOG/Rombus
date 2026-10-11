@@ -89,3 +89,12 @@ def test_unchanged_tables_are_not_uploaded_again(cloud, tmp_path, monkeypatch):
 def test_supabase_urls_use_the_psycopg_driver(monkeypatch):
     monkeypatch.setattr(settings, "DATABASE_URL", "postgresql://postgres.abc:pw@aws-0.pooler.supabase.com:5432/postgres")
     assert database_url().startswith("postgresql+psycopg://postgres.abc:pw@")
+
+
+@pytest.mark.parametrize("password, encoded", [
+    ("my#pass@word/1", "my%23pass%40word%2F1"),   # special characters are made safe
+    ("my%23pass", "my%23pass"),                   # already encoded: unchanged
+])
+def test_passwords_with_special_characters(monkeypatch, password, encoded):
+    monkeypatch.setattr(settings, "DATABASE_URL", f"postgresql://postgres.abc:{password}@aws-0.pooler.supabase.com:5432/postgres")
+    assert database_url() == f"postgresql+psycopg://postgres.abc:{encoded}@aws-0.pooler.supabase.com:5432/postgres"

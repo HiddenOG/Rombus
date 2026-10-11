@@ -14,6 +14,7 @@ import io
 import logging
 import os
 from typing import Any, Dict, List, Optional, Protocol
+from urllib.parse import quote, unquote
 
 import httpx
 import pandas as pd
@@ -51,10 +52,21 @@ logger = logging.getLogger(__name__)
 def database_url() -> str:
     """DATABASE_URL if set, otherwise a SQLite file inside DATA_DIR.
     Supabase hands out plain "postgresql://" URLs; we talk to them with the psycopg driver."""
-    url = settings.DATABASE_URL.strip()
+    url = settings.DATABASE_URL.strip().strip("\"'")
     if url.startswith(("postgresql://", "postgres://")):
-        url = "postgresql+psycopg://" + url.split("://", 1)[1]
+        url = "postgresql+psycopg://" + _encode_password(url.split("://", 1)[1])
     return url or f"sqlite:///{os.path.join(settings.DATA_DIR, 'sessions.db')}"
+
+
+def _encode_password(rest: str) -> str:
+    """In "user:password@host/db", make the password URL-safe. Characters like # / @ ? would
+    otherwise be read as parts of the address (a # starts a "bookmark", cutting the rest off).
+    Already-encoded passwords (%23 etc.) are left as they are."""
+    credentials, at, host = rest.rpartition("@")
+    if not at or ":" not in credentials:
+        return rest
+    user, _, password = credentials.partition(":")
+    return f"{user}:{quote(unquote(password), safe='')}@{host}"
 
 
 class Database:
