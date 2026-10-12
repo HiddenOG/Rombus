@@ -11,6 +11,7 @@ from typing import Awaitable, Callable, Dict, List, Tuple
 
 from app.config import settings
 from app.copilot_prompt import failure
+from app.intent import obvious_step
 from app.session import DataSession
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,11 @@ async def get_copilot_response(session: DataSession, user_message: str) -> dict:
         if not reason:
             reply["provider"] = label
             reply.setdefault("model", model())
+            if not reply.get("suggested_actions"):
+                # The safety net: an obvious request still gets its Run button (see app/intent.py)
+                step = obvious_step(session, user_message)
+                if step:
+                    reply["suggested_actions"] = [step]
             if tried:
                 reply["fallback_note"] = f"Answered by {label} because {', '.join(tried)}."
             return reply
