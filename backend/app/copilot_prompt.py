@@ -75,10 +75,14 @@ PHASE_TOOLS = {
     # Re-locking the test rows is never offered: repeated re-locks are how a "lucky split" gets shopped for
     "cleaning": CLEAN + LOOK + ["train_models", "undo"],
     "modeling": MODEL + ["preview_data", "plot_correlation", "undo"],
+    # No target yet: clean and look; choosing a target is how a model would start
+    "clean_only": CLEAN + LOOK + ["select_target", "undo"],
 }
 
 
 def phase(session: DataSession) -> str:
+    if session.clean_only:
+        return "clean_only"
     if not session.is_split:
         return "before_lock"
     return "modeling" if session.trained_models else "cleaning"
@@ -136,11 +140,17 @@ def state_snapshot(session: DataSession) -> str:
             f"LOCKED: {state['test_rows']} rows ({state['test_size']:.0%}) are set aside as the final test set. "
             "Everything you see is the training rows only."
         )
+    elif state["clean_only"]:
+        split_status = (
+            "CLEAN-ONLY MODE: the user is cleaning data, not building a model. There's no target and no test "
+            "set; every step works on ALL rows and they'll export the whole cleaned table. Help them clean. "
+            "Don't push modelling; if they want a model, they choose a target with select_target."
+        )
     else:
         split_status = (
-            "NOT YET LOCKED. Strict mode: only column names and types are visible, and only previewing and "
-            "choosing the target are possible. Help the user pick the column to predict, and ask what "
-            "percentage of rows to lock away as the final test set (default 20%, usually 10-30%)."
+            "NOT YET STARTED. Strict mode: only column names and types are visible. Ask what they want: predict "
+            "a column (select_target: then ask what percentage of rows to lock away as the final test set, "
+            "default 20%, usually 10-30%), or only clean the data (clean_only)."
         )
     return f"""
 SESSION STATE

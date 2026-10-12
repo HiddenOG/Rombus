@@ -10,6 +10,7 @@ export function ExportMenu({ nb }) {
     const [busy, setBusy] = useState(false);
     const ref = useRef(null);
     const locked = Boolean(nb.summary?.is_split);
+    const cleanOnly = Boolean(nb.summary?.clean_only);
     const trained = Boolean(nb.summary?.trained_models?.length);
     const disabled = !nb.sessionId || nb.isProcessing || busy;
 
@@ -32,7 +33,16 @@ export function ExportMenu({ nb }) {
         }
     };
 
-    const items = [
+    // Clean-only notebooks: no test rows and no model, so the export is simply the whole cleaned table
+    const items = cleanOnly ? [
+        { icon: Table2, label: 'Cleaned data', text: 'Every row, after your steps, as CSV.', onClick: download('train', 'csv') },
+        { icon: FileSpreadsheet, label: 'Cleaned data (Excel)', text: 'Same, as an .xlsx file.', onClick: download('train', 'xlsx') },
+        {
+            icon: FileCode2, label: 'Cleaning as a Python script',
+            text: 'Your steps as one runnable .py file that cleans the original file the same way.',
+            onClick: download('script'),
+        },
+    ] : [
         { icon: Table2, label: 'Cleaned training rows', text: 'The data after your recipe, as CSV.', onClick: download('train', 'csv') },
         { icon: FileSpreadsheet, label: 'Cleaned training rows (Excel)', text: 'Same, as an .xlsx file.', onClick: download('train', 'xlsx') },
         {

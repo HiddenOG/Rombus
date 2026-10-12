@@ -111,7 +111,11 @@ function CommandBar({ nb }) {
 
     const [predicting, setPredicting] = useState(false);
     const canPredict = summary?.trained_models?.length > 0 && summary?.raw_features?.length > 0;
-    const available = Object.values(tools).filter(t => summary?.is_split || t.before_split);
+    const available = Object.values(tools).filter(t =>
+        summary?.is_split || t.before_split || (summary?.clean_only && !t.needs_target));
+    // Just uploaded: predict a column (choose the target), or only clean the data
+    const choosing = sessionId && summary && !summary.is_split && !summary.clean_only;
+    const chooseTarget = () => { setToolName('select_target'); setAdding(true); setPredicting(false); };
     const submit = (e) => {
         e.preventDefault();
         if (!text.trim() || isProcessing) return;
@@ -129,6 +133,28 @@ function CommandBar({ nb }) {
                         <button onClick={nb.clearError} aria-label="Dismiss error" className="rounded-full p-1 hover:bg-red-100">
                             <X className="h-4 w-4" />
                         </button>
+                    </div>
+                )}
+
+                {choosing && !adding && (
+                    <div className="rounded-2xl border border-brand-200 bg-brand-50/60 p-3.5 animate-in">
+                        <p className="mb-2.5 text-sm font-semibold text-ink">What would you like to do with this data?</p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                            <StartOption
+                                icon={Target}
+                                title="Predict a column"
+                                text="Build a model. A share of rows is locked away first, for an honest final score."
+                                onClick={chooseTarget}
+                                disabled={isProcessing}
+                            />
+                            <StartOption
+                                icon={Wand2}
+                                title="Just clean the data"
+                                text="No model: every step works on all rows, then export the cleaned table."
+                                onClick={() => nb.run({ tool: 'clean_only', arguments: {} })}
+                                disabled={isProcessing}
+                            />
+                        </div>
                     </div>
                 )}
 
@@ -232,6 +258,22 @@ function CommandBar({ nb }) {
     );
 }
 
+function StartOption({ icon: Icon, title, text, ...props }) {
+    return (
+        <button
+            type="button"
+            {...props}
+            className="flex gap-3 rounded-xl border border-line bg-surface p-3 text-left transition-colors hover:border-brand-300 disabled:opacity-50"
+        >
+            <Icon className="mt-0.5 h-4.5 w-4.5 shrink-0 text-brand-600" />
+            <span>
+                <span className="block text-sm font-semibold text-ink">{title}</span>
+                <span className="block text-xs leading-relaxed text-ink-3">{text}</span>
+            </span>
+        </button>
+    );
+}
+
 function QuickButton({ children, ...props }) {
     return (
         <button
@@ -256,7 +298,8 @@ function EmptyState({ onUpload, isProcessing }) {
             <Logo size={64} className="mx-auto mb-5 drop-shadow-md sm:mb-6" />
             <h2 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">Your data science notebook</h2>
             <p className="mx-auto mt-3 max-w-md text-[15px] leading-relaxed text-ink-2">
-                Upload a spreadsheet and build a prediction model step by step. Ask the copilot, or add steps yourself.
+                Upload a spreadsheet, then build a prediction model step by step, or just clean it. Ask the
+                copilot, or add steps yourself.
             </p>
             <label
                 className={`mt-6 inline-flex items-center gap-2 rounded-xl bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand-200 ${

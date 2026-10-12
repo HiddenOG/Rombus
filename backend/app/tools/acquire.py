@@ -78,6 +78,27 @@ def select_target(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     return {"success": True, "message": msg}
 
 
+@register_tool(
+    "clean_only",
+    "Clean the data without building a model: no target and no locked test rows, every step works on ALL "
+    "rows, and the whole cleaned table can be exported. Use when the user only wants to clean or prepare data. "
+    "A target can still be chosen later (the cleaning is kept and replayed on the training rows).",
+    before_split=True,
+    kind="action",
+)
+def clean_only(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
+    session.start_clean_only()
+    if session.current_stage == "ACQUIRE":
+        session.current_stage = "SCRUB"
+    return {
+        "success": True,
+        "message": f"Clean-only mode: working on all {len(session.df):,} rows, with no target and no model. "
+                   "Statistics are visible now, and Export gives you the whole cleaned table. To build a model "
+                   "later, choose the column to predict: the test rows are then locked from the original data "
+                   "and your cleaning steps replay on the training rows, so nothing leaks.",
+    }
+
+
 MAX_PREVIEW_ROWS = 200
 
 
@@ -92,7 +113,7 @@ MAX_PREVIEW_ROWS = 200
 def preview_data(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Preview rows: head, tail or a random sample."""
     rows = max(1, min(int(args.get("rows", 5)), MAX_PREVIEW_ROWS))
-    if not session.is_split:
+    if not session.can_explore:
         rows = min(rows, PREVIEW_ROWS_BEFORE_SPLIT)
     position = args.get("position") or "first"
     if position not in ("first", "last", "random"):

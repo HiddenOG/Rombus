@@ -33,7 +33,7 @@ class TestBeforeLock:
     def test_cleaning_blocked(self, session):
         result = execute_tool("impute_all_missing", session, {})
         assert not result["success"]
-        assert "target column first" in result["message"]
+        assert "column to predict" in result["message"] and "Clean only" in result["message"]
 
     def test_charts_blocked(self, session):
         assert not execute_tool("plot_histogram", session, {"column": "age"})["success"]

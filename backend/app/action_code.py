@@ -67,6 +67,15 @@ train, test = train_test_split(
 VIEW_NOTE = "# `result` is what gets shown. Uncomment a .plot line to draw a chart (needs matplotlib).\n"
 
 
+@builder("clean_only")
+def _clean_only(session, args):
+    return HEADER + _code(f'''
+# Clean-only: no target and no model, so there are no test rows to set aside.
+# Every cleaning step works on all the rows of the original file.
+df = pd.read_csv({session.filename!r})
+''')
+
+
 @builder("preview_data")
 def _preview(session, args):
     rows = int(args.get("rows") or 5)

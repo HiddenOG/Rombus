@@ -57,9 +57,18 @@ def register_tool(
     return decorator
 
 
+# Tools that build or use a model: they need a target (and so locked test rows)
+NEEDS_TARGET: Set[str] = {"train_test_split", "train_models", "auto_ml", "final_exam", "predict",
+                          "explain_model", "save_model", "custom_models"}
+
+
 def available_tools(session: DataSession) -> List[str]:
     """Tools the session may use right now."""
-    return list(TOOL_REGISTRY) if session.is_split else [t for t in TOOL_REGISTRY if t in BEFORE_SPLIT_TOOLS]
+    if session.is_split:
+        return list(TOOL_REGISTRY)
+    if session.clean_only:
+        return [t for t in TOOL_REGISTRY if t not in NEEDS_TARGET]
+    return [t for t in TOOL_REGISTRY if t in BEFORE_SPLIT_TOOLS]
 
 
 def execute_tool(tool_name: str, session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -68,10 +77,18 @@ def execute_tool(tool_name: str, session: DataSession, args: Dict[str, Any]) -> 
         return {"success": False, "message": f"Unknown tool: {tool_name}"}
 
     if tool_name not in available_tools(session):
+        if session.clean_only:
+            return {
+                "success": False,
+                "message": "This notebook is in clean-only mode, so there's no model yet. To build one, choose "
+                           "the column to predict with Select target: your cleaning steps are kept and "
+                           "replayed on the training rows.",
+            }
         return {
             "success": False,
-            "message": "Choose the target column first. That locks away the test rows; "
-                       "until then you can only preview a few rows.",
+            "message": "First choose what to do: pick the column to predict (Select target, which locks away "
+                       "the test rows), or Clean only, to clean the data without a model. Until then you can "
+                       "only preview a few rows.",
         }
 
     # An argument sent as null (LLMs often do this) means "not provided": let the tool use its default

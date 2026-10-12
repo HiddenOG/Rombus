@@ -68,6 +68,9 @@ class DataSession:
         self.exam_count = 0
         # The visitor who created this notebook; only they can see or change it
         self.owner: Optional[str] = None
+        # Clean-only mode: no target and no model, so no test rows to protect. Steps work on ALL rows.
+        # Choosing a target later locks test rows from the original data and replays the recipe.
+        self.clean_only = False
         self.created_at = time.time()
         self.updated_at = time.time()
 
@@ -259,6 +262,21 @@ class DataSession:
     def is_split(self) -> bool:
         return self.test_df is not None
 
+    @property
+    def can_explore(self) -> bool:
+        """Statistics and cleaning are open once test rows are locked away, or in clean-only mode
+        (no model will ever be scored on these rows, so there's nothing for them to leak into)."""
+        return self.is_split or self.clean_only
+
+    def start_clean_only(self) -> None:
+        """Work on all the rows, without a target or a model."""
+        if self.is_split:
+            raise ValueError("This notebook already predicts a column, so its test rows stay locked. "
+                             "Start a new notebook from the same file to clean it without a model.")
+        self.clean_only = True
+        self.raw_train = self.original_df.copy()
+        self._set_recipe(self.recipe)
+
     def lock_test_rows(self, test_size: float) -> int:
         """Set aside test rows from the original data; self.df becomes the training rows.
 
@@ -276,6 +294,9 @@ class DataSession:
             self.raw_train, self.test_df, self.test_size, self.df = previous
             raise
         self.lock_count += 1
+        # From clean-only to modelling: the test rows came from the ORIGINAL data and the recipe was
+        # replayed on the training rows only, so the cleaning done on all rows leaks nothing
+        self.clean_only = False
         return dropped
 
     def _split(self, test_size: float) -> int:
@@ -303,13 +324,13 @@ class DataSession:
         """Compute statistical evidence for a single column.
 
         Before the test rows are locked away, only the name and type are revealed:
-        statistics would let test rows influence decisions.
+        statistics would let test rows influence decisions. (Clean-only mode has no test rows.)
         """
         if col not in self.df.columns:
             return {}
         series = self.df[col]
         evidence = {"name": col, "dtype": str(series.dtype)}
-        if not self.is_split:
+        if not self.can_explore:
             return evidence
         evidence |= {
             "missing_ratio": float(series.isnull().mean()),
@@ -344,6 +365,7 @@ class DataSession:
             "problem_type": self.problem_type,
             "has_split": self.X_train is not None,
             "is_split": self.is_split,
+            "clean_only": self.clean_only,
             "test_rows": len(self.test_df) if self.is_split else 0,
             "test_size": self.test_size,
             "lock_count": self.lock_count,
@@ -448,7 +470,8 @@ class SessionManager:
         session.updated_at = time.time()
         sid = session.session_id
         self._save_or_delete(f"{sid}_original", session.original_df)
-        self._save_or_delete(f"{sid}_train", session.raw_train)
+        # Clean-only: the rows are the original upload, already saved above
+        self._save_or_delete(f"{sid}_train", None if session.clean_only else session.raw_train)
         self._save_or_delete(f"{sid}_test", session.test_df)
 
         self._db.save({
@@ -468,6 +491,7 @@ class SessionManager:
             "cells": json.dumps(session.cells, default=str),
             "exam_count": session.exam_count,
             "owner": session.owner,
+            "clean_only": int(session.clean_only),
         })
 
     def _load_session(self, session_id: str) -> Optional[DataSession]:
@@ -493,15 +517,20 @@ class SessionManager:
             session.cells = json.loads(row["cells"] or "[]")
             session.exam_count = row["exam_count"] or 0
             session.owner = row["owner"]
+            lines = [Line(s["tool"], s["args"], **({"id": s["id"]} if "id" in s else {}))
+                     for s in json.loads(row["recipe"] or "[]")]
 
             # Rebuild the training rows: raw training rows + replayed recipe (restores sticky notes too)
             train, test = self._files.load(f"{session_id}_train"), self._files.load(f"{session_id}_test")
             if train is not None and test is not None:
                 session.raw_train, session.test_df = train, test
                 session.test_size = row["test_size"]
-                lines = [Line(s["tool"], s["args"], **({"id": s["id"]} if "id" in s else {}))
-                         for s in json.loads(row["recipe"] or "[]")]
                 session._set_recipe(lines)
+                session.models_cleared = False
+            elif row.get("clean_only"):
+                # Clean-only: the rows to clean are simply the original upload (no second copy stored)
+                session.recipe = lines
+                session.start_clean_only()
                 session.models_cleared = False
 
             # What's in storage now matches memory: nothing to upload until it changes

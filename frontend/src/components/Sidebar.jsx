@@ -192,6 +192,8 @@ function DatasetOverview({ summary }) {
                     <InfoRow icon={Target} label="Target">
                         {summary?.target ? (
                             <span className="font-semibold text-brand-700">{summary.target}</span>
+                        ) : summary?.clean_only ? (
+                            <span className="font-medium text-ink-2">None: cleaning only</span>
                         ) : (
                             <span className="text-ink-3">Not chosen yet</span>
                         )}
@@ -223,7 +225,7 @@ function ColumnList({ summary }) {
     return (
         <section>
             <SectionTitle icon={Layers}>Columns · {summary?.columns?.length}</SectionTitle>
-            {!summary?.is_split && (
+            {!summary?.is_split && !summary?.clean_only && (
                 <p className="mb-3 flex gap-2 rounded-xl bg-brand-50 border border-brand-100 px-3 py-2.5 text-xs leading-relaxed text-ink-2">
                     <Lock className="w-3.5 h-3.5 mt-0.5 shrink-0 text-brand-600" />
                     Statistics stay hidden until you choose the column to predict and lock away the test rows.

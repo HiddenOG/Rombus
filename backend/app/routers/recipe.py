@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from app.access import current_owner, load_owned
 from app.config import settings
 from app.session import DataSession, run_exclusive, session_manager
-from app.tools import BEFORE_SPLIT_TOOLS, TOOL_KINDS, TOOL_SPECS
+from app.tools import BEFORE_SPLIT_TOOLS, NEEDS_TARGET, TOOL_KINDS, TOOL_SPECS
 
 router = APIRouter()
 
@@ -49,7 +49,8 @@ async def list_tools():
     """Every tool with its settings schema, so the notebook can build edit forms."""
     return {
         "tools": [
-            {**spec, "kind": TOOL_KINDS[name], "before_split": name in BEFORE_SPLIT_TOOLS}
+            {**spec, "kind": TOOL_KINDS[name], "before_split": name in BEFORE_SPLIT_TOOLS,
+             "needs_target": name in NEEDS_TARGET}
             for name, spec in TOOL_SPECS.items()
             if settings.ALLOW_CUSTOM_CODE or not name.startswith("custom_")
         ]
@@ -113,8 +114,8 @@ async def export(session_id: str, what: str = "train", format: str = "csv", algo
                 raise HTTPException(status_code=400, detail=str(e))
             return body, "application/octet-stream", f"{stem}_{_safe_name(model_name)}_model.pkl"
         if what == "script":
-            if not session.is_split:
-                raise HTTPException(status_code=400, detail="Choose the target first: the pipeline starts with the lock.")
+            if not session.can_explore:
+                raise HTTPException(status_code=400, detail="Choose the target (or Clean only) first: the pipeline starts there.")
             return pipeline_script(session).encode("utf-8"), "text/x-python", f"{stem}_pipeline.py"
         if what in ("train", "all") and format in ("csv", "xlsx"):
             body, media = to_file(cleaned_rows(session, what), format)

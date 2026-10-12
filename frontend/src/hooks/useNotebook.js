@@ -314,7 +314,7 @@ export function useNotebook() {
     // ── Kernel controls (like Jupyter's) ─────────────────────────────────────
     // Never re-run automatically: choosing the target (re-lock), the final exam (another look at the
     // test rows), and one-off actions
-    const NO_AUTO_RERUN = new Set(['select_target', 'final_exam', 'undo', 'save_model', 'transition_stage']);
+    const NO_AUTO_RERUN = new Set(['select_target', 'clean_only', 'final_exam', 'undo', 'save_model', 'transition_stage']);
 
     const restart = () => busy(async () => {
         const data = await api.restartSession(sessionId);

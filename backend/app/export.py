@@ -43,6 +43,8 @@ def _numbered(code: str, n: int) -> str:
 
 def pipeline_script(session: DataSession) -> str:
     """The notebook's recipe as a standalone script that reproduces the app's cleaned data."""
+    if session.clean_only:
+        return _cleaning_script(session)
     target, size = session.target_column, session.test_size or 0.2
     stratify = f"df[{target!r}]" if _stratifies(session, size) else "None"
     steps = session.recipe
@@ -120,6 +122,51 @@ def main(path={session.filename!r}):
     test_clean.to_csv("test_clean.csv", index=False)
     print(f"Saved train_clean.csv ({{len(train_clean)}} rows) and test_clean.csv ({{len(test_clean)}} rows)")
     return train_clean, test_clean
+
+
+if __name__ == "__main__":
+    main(*sys.argv[1:])
+''')
+    return "\n".join(parts)
+
+
+def _cleaning_script(session: DataSession) -> str:
+    """Clean-only notebooks: every step on the whole file, no split (there's no model to test)."""
+    steps = session.recipe
+    stem = re.sub(r"[^A-Za-z0-9_.-]", "_", session.filename.rsplit(".", 1)[0])
+    parts = [f'''"""Data-cleaning script exported from AutoML Copilot (clean-only notebook).
+
+Dataset: {session.filename}
+Steps:   {len(steps)} ({", ".join(l.tool for l in steps) or "none"})
+
+There's no model, so every step runs on all the rows, in order.
+Run:  python {stem}_pipeline.py
+"""
+
+import sys
+
+import numpy as np
+import pandas as pd
+''']
+    for n, line in enumerate(steps, 1):
+        parts.append(f"\n# ── Step {n}: {line.tool.replace('_', ' ')} " + "─" * 20 + "\n\n"
+                     + _numbered(step_code(line, None, with_learned=False), n))
+    runs = "\n".join(f"    df = step{n}_apply(df, step{n}_learn(df))" for n in range(1, len(steps) + 1)) or "    pass"
+    parts.append(f'''
+
+def clean(df):
+    """Every step, in order, on all the rows."""
+    df = df.copy()
+{runs}
+    return df
+
+
+def main(path={session.filename!r}):
+    df = pd.read_csv(path) if path.endswith(".csv") else pd.read_excel(path)
+    cleaned = clean(df)
+    cleaned.to_csv({stem + "_clean.csv"!r}, index=False)
+    print(f"Saved {stem}_clean.csv ({{len(cleaned)}} rows)")
+    return cleaned
 
 
 if __name__ == "__main__":

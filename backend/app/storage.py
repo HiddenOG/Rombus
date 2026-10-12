@@ -45,6 +45,7 @@ sessions_table = Table(
     Column("cells", Text),
     Column("exam_count", Integer),
     Column("owner", String(64)),
+    Column("clean_only", Integer),
 )
 
 
