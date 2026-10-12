@@ -11,7 +11,7 @@ from sklearn.ensemble import (
     RandomForestRegressor, GradientBoostingRegressor,
     RandomForestClassifier, GradientBoostingClassifier,
 )
-from sklearn.linear_model import Ridge, Lasso, LogisticRegression
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, LogisticRegression
 from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsRegressor, KNeighborsClassifier
 from sklearn.svm import SVC, SVR
@@ -36,6 +36,7 @@ CLASSIFICATION_MODELS = {
 }
 
 REGRESSION_MODELS = {
+    "linear": lambda: LinearRegression(),
     "rf": lambda: RandomForestRegressor(n_estimators=100, random_state=42),
     "gb": lambda: GradientBoostingRegressor(n_estimators=100, random_state=42),
     "ridge": lambda: Ridge(),
@@ -86,6 +87,7 @@ ALGORITHM_ALIASES = {
     "k_nearest_neighbors": "knn", "nearest_neighbors": "knn", "kneighbors": "knn",
     "svm": "svc", "support_vector_machine": "svc",
     "ridge_regression": "ridge", "lasso_regression": "lasso",
+    "linear_regression": "linear", "linearregression": "linear", "ols": "linear", "lr_regression": "linear",
 }
 
 ALGORITHM = {
@@ -243,6 +245,9 @@ def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Train one or more ML models (doing the practice split first if it hasn't happened)."""
     model_registry = CLASSIFICATION_MODELS if session.problem_type == "classification" else REGRESSION_MODELS
     alg_names = [ALGORITHM_ALIASES.get(str(a).lower().replace(" ", "_"), str(a).lower()) for a in args.get("algorithms", ["rf", "gb"])]
+    if session.problem_type == "regression":
+        # "lr" is logistic regression for yes/no problems; for numbers it can only mean linear regression
+        alg_names = ["linear" if a == "lr" else a for a in alg_names]
     unknown = [a for a in alg_names if a not in model_registry]
     if unknown:
         return {"success": False,

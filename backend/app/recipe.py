@@ -168,12 +168,36 @@ class CleanNumericString(Step):
     def apply(self, df, learned):
         col = self.args["column"]
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col].astype(str).str.replace(r"[^\d.\-]", "", regex=True), errors="coerce")
+            df[col] = clean_number(df[col])
         return df
 
     def summary(self, before, after, learned):
         col = self.args["column"]
-        return f"Cleaned '{col}': {before[col].dtype} → {after[col].dtype}. Blanks after conversion: {int(after[col].isna().sum())}."
+        ranges = int(before[col].astype(str).str.match(RANGE_PATTERN).sum())
+        new_blanks = int(after[col].isna().sum() - before[col].isna().sum())
+        msg = f"Cleaned '{col}': {before[col].dtype} → {after[col].dtype}."
+        if ranges:
+            msg += f" {ranges} ranges (like '2100 - 2850') became their midpoint."
+        if new_blanks:
+            msg += f" {new_blanks} values had no usable number and became blanks."
+        return msg
+
+
+# "2100 - 2850", "1,200-1,500": a range, read as its midpoint
+RANGE_PATTERN = r"^\s*(\d[\d,]*\.?\d*)\s*-\s*(\d[\d,]*\.?\d*)\s*$"
+
+
+def clean_number(series: pd.Series) -> pd.Series:
+    """Text to numbers: "$1,200" -> 1200, "2 BHK" -> 2, "2100 - 2850" -> 2475 (the midpoint)."""
+    text = series.astype(str)
+    ends = text.str.extract(RANGE_PATTERN)
+    low = pd.to_numeric(ends[0].str.replace(",", ""), errors="coerce")
+    high = pd.to_numeric(ends[1].str.replace(",", ""), errors="coerce")
+    plain = pd.to_numeric(text.str.replace(r"[^\d.\-]", "", regex=True), errors="coerce").where(series.notna())
+    is_range = low.notna() & high.notna()
+    if not is_range.any():
+        return plain  # no ranges: exactly as before (whole numbers stay whole numbers)
+    return ((low + high) / 2).where(is_range, plain)
 
 
 @step_type("standardize_text")
@@ -433,6 +457,109 @@ class AddColumn(Step):
         return msg
 
 
+@step_type("group_rare_categories")
+class GroupRareCategories(Step):
+    """Values seen in at most `max_rows` training rows become one label ('other'), e.g. the many
+    locations with a handful of houses each. Which values count as common is LEARNED from the
+    training rows: test rows and new customers use that same list (a value never seen in training
+    becomes 'other' too)."""
+    kind = "learn"
+
+    def _settings(self):
+        try:
+            max_rows = int(self.args.get("max_rows", 10))
+        except (TypeError, ValueError):
+            raise ValueError("'max_rows' must be a whole number.")
+        if max_rows < 1:
+            raise ValueError("'max_rows' must be at least 1.")
+        return max_rows, str(self.args.get("label") or "other")
+
+    def learn(self, train):
+        col = self._require_column(train, self.args.get("column"))
+        if col == self.ctx.target:
+            raise ValueError("Group the values of a feature, not of the column you're predicting.")
+        max_rows, _ = self._settings()
+        counts = train[col].dropna().astype(str).str.strip().value_counts()
+        return {"keep": sorted(counts[counts > max_rows].index.tolist())}
+
+    def apply(self, df, learned):
+        col = self.args["column"]
+        if col in df.columns:
+            _, label = self._settings()
+            values = df[col].astype(str).str.strip().where(df[col].notna())
+            df[col] = values.where(values.isin(learned["keep"]) | values.isna(), label)
+        return df
+
+    def summary(self, before, after, learned):
+        col = self.args["column"]
+        max_rows, label = self._settings()
+        was = before[col].nunique()
+        return (f"'{col}': {was} values → {len(learned['keep'])} kept + '{label}' (values in {max_rows} or fewer "
+                f"training rows). {int((after[col] == label).sum())} training rows are now '{label}'.")
+
+
+@step_type("remove_outliers")
+class RemoveOutliers(Step):
+    """Drop training rows whose value is extreme within its group, e.g. price per sqft more than
+    1 standard deviation from its location's average.
+
+    Training rows only. That's also why the value may use the target (price / total_sqft): it only
+    decides which rows the model learns from, it never becomes a feature, and test rows and new
+    customers are never dropped (you still have to predict for them)."""
+    kind = "train_only"
+    METHODS = ("std", "iqr")
+
+    def _settings(self):
+        method = self.args.get("method") or "std"
+        if method not in self.METHODS:
+            raise ValueError("Method must be 'std' (standard deviations from the mean) or 'iqr' (interquartile range).")
+        default = 3.0 if method == "std" else 1.5
+        try:
+            k = float(self.args.get("threshold") if self.args.get("threshold") not in (None, "") else default)
+        except (TypeError, ValueError):
+            raise ValueError("'threshold' must be a number.")
+        if k <= 0:
+            raise ValueError("'threshold' must be more than 0.")
+        return method, k
+
+    def _keep(self, df):
+        from app.expressions import evaluate_formula
+        value = evaluate_formula(df, self.args.get("value", ""))
+        method, k = self._settings()
+        group = self.args.get("group_by")
+        groups = df[group].astype(str) if group else pd.Series("all", index=df.index)
+        grouped = value.groupby(groups)
+        if method == "std":
+            center, spread = grouped.transform("mean"), grouped.transform("std")
+            low, high = center - k * spread, center + k * spread
+        else:
+            q1, q3 = grouped.transform(lambda v: v.quantile(0.25)), grouped.transform(lambda v: v.quantile(0.75))
+            low, high = q1 - k * (q3 - q1), q3 + k * (q3 - q1)
+        # Blank values, and groups too small to have a spread, are kept
+        return value.isna() | low.isna() | high.isna() | value.between(low, high)
+
+    def learn(self, train):
+        if self.args.get("group_by"):
+            self._require_column(train, self.args.get("group_by"), "group_by")
+        self._settings()
+        self._keep(train)  # check the formula reads before anything runs
+        return {}
+
+    def apply(self, df, learned):
+        return df[self._keep(df)].reset_index(drop=True)
+
+    def summary(self, before, after, learned):
+        method, k = self._settings()
+        rule = f"more than {k:g} standard deviations from the mean" if method == "std" else f"beyond {k:g}× the IQR"
+        per = f" of its {self.args['group_by']}" if self.args.get("group_by") else ""
+        dropped = len(before) - len(after)
+        msg = (f"Dropped {dropped} training rows where {self.args['value']} is {rule}{per}. "
+               f"Row count: {len(before)} → {len(after)}.")
+        if dropped / max(len(before), 1) > 0.25:
+            msg += f" That's {dropped / len(before):.0%} of the training rows: a larger threshold keeps more."
+        return msg + " Test rows and new customers aren't dropped: you still have to predict for them."
+
+
 # ── Learning steps ──────────────────────────────────────────────────────────────
 
 def _fill_value(series: pd.Series, strategy: str) -> Any:
@@ -520,9 +647,13 @@ def _onehot(df: pd.DataFrame, col: str, classes: List[str]) -> pd.DataFrame:
     return pd.concat([df.drop(columns=[col]), columns], axis=1)
 
 
-# One-hot makes one new column per category. Past this many, it's almost always an ID, a name or
-# free text (one column per passenger teaches the model nothing), and it can run the server out of memory.
-MAX_ONEHOT_CATEGORIES = 30
+# One-hot makes one new column per category. Refused when that would be harmful:
+#   ID-like: nearly every row has its own value (names, IDs): one column per passenger teaches nothing
+#   too many categories, or too many new cells for the server's memory
+# Real high-cardinality features (e.g. ~240 Bengaluru locations) are fine.
+MAX_ONEHOT_CATEGORIES = 300
+MAX_ONEHOT_CELLS = 30_000_000
+ID_LIKE_MIN_CATEGORIES = 50
 
 
 def _check_encoding(method: str) -> None:
@@ -530,16 +661,25 @@ def _check_encoding(method: str) -> None:
         raise ValueError(f"Unknown encoding method '{method}'. Use 'label' or 'onehot'.")
 
 
-def _check_onehot_size(classes: Dict[str, List[str]]) -> None:
-    too_many = {col: len(c) for col, c in classes.items() if len(c) > MAX_ONEHOT_CATEGORIES}
-    if too_many:
-        listed = ", ".join(f"'{col}' ({n} different values)" for col, n in too_many.items())
+def _check_onehot_size(classes: Dict[str, List[str]], rows: int) -> None:
+    id_like = {c: len(v) for c, v in classes.items() if len(v) >= ID_LIKE_MIN_CATEGORIES and len(v) > 0.5 * rows}
+    too_many = {c: len(v) for c, v in classes.items() if len(v) > MAX_ONEHOT_CATEGORIES and c not in id_like}
+    if id_like:
+        listed = ", ".join(f"'{c}' ({n} different values in {rows} rows)" for c, n in id_like.items())
         raise ValueError(
-            f"One-hot encoding would add one column per value, and {listed} "
-            f"{'has' if len(too_many) == 1 else 'have'} more than {MAX_ONEHOT_CATEGORIES}. Columns like that are "
-            "usually IDs, names or free text, which don't help a model generalise. Remove "
-            f"{'it' if len(too_many) == 1 else 'them'} first, clean it into a number if it's really numeric "
-            "(e.g. prices stored as text), or use label encoding.")
+            f"{listed}: almost every row has its own value, so it looks like an ID, a name or free text. One-hot "
+            "would add a column per row and teach the model nothing. Remove it, clean it into a number if it's "
+            "really numeric (e.g. prices stored as text), or use label encoding.")
+    if too_many:
+        listed = ", ".join(f"'{c}' ({n} values)" for c, n in too_many.items())
+        raise ValueError(
+            f"{listed} has more than {MAX_ONEHOT_CATEGORIES} values. Group the rare ones into 'other' first "
+            "(Group rare categories), or use label encoding.")
+    cells = rows * sum(len(v) for v in classes.values())
+    if cells > MAX_ONEHOT_CELLS:
+        raise ValueError(
+            f"One-hot here would add {cells:,} cells, more than this server allows ({MAX_ONEHOT_CELLS:,}). "
+            "Group rare categories into 'other' first, or use label encoding.")
 
 
 @step_type("encode_categorical")
@@ -551,7 +691,7 @@ class EncodeCategorical(Step):
         _check_encoding(self.args.get("method", "label"))
         classes = {col: _categories(train[col])}
         if self.args.get("method", "label") == "onehot":
-            _check_onehot_size(classes)
+            _check_onehot_size(classes, len(train))
         return {"classes": classes}
 
     def apply(self, df, learned):
@@ -580,7 +720,7 @@ class EncodeAllCategorical(Step):
         cols = [c for c in categorical_columns(train) if c != self.ctx.target]
         classes = {c: _categories(train[c]) for c in cols}
         if self.args.get("method", "label") == "onehot":
-            _check_onehot_size(classes)
+            _check_onehot_size(classes, len(train))
         return {"classes": classes}
 
     apply = EncodeCategorical.apply

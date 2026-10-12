@@ -60,6 +60,18 @@ def _split_condition(df: pd.DataFrame, text: str) -> Tuple[str, str, str]:
 
 
 def _condition(df: pd.DataFrame, text: str) -> Tuple[pd.Series, str]:
+    """One condition: `column op value` (text, blanks, contains), or else a formula comparison
+    between columns, like `bath > bhk + 2` or `total_sqft / bhk < 300`."""
+    try:
+        return _simple_condition(df, text)
+    except ValueError as simple_error:
+        try:
+            return evaluate_condition(df, text), text.strip()
+        except ValueError:
+            raise simple_error from None
+
+
+def _simple_condition(df: pd.DataFrame, text: str) -> Tuple[pd.Series, str]:
     col, op, value_text = _split_condition(df, text)
     series = df[col]
     if op.startswith("is not"):
@@ -102,6 +114,11 @@ def parse_filter(df: pd.DataFrame, text: str) -> Tuple[pd.Series, str]:
 def filter_code(df: pd.DataFrame, text: str, frame: str = "df") -> str:
     """The same conditions as a plain pandas mask, e.g. (df['price'] > 100.0) & (df['location'] == 'Hebbal')."""
     def one(piece: str) -> str:
+        try:
+            _simple_condition(df, piece)
+        except ValueError:
+            # A comparison between columns: written as the formula, compared to 1 (true)
+            return f"({formula_code(piece, df.columns, frame)} == 1)"
         col, op, value_text = _split_condition(df, piece)
         ref = f"{frame}[{col!r}]"
         if op.startswith("is not"):
@@ -208,6 +225,14 @@ def evaluate_formula(df: pd.DataFrame, formula: str) -> pd.Series:
     if not isinstance(result, pd.Series):
         result = pd.Series(result, index=df.index, dtype=float)
     return result.replace([np.inf, -np.inf], np.nan)
+
+
+def evaluate_condition(df: pd.DataFrame, text: str) -> pd.Series:
+    """A comparison formula (`bath > bhk + 2`) as a row mask. Blanks count as not matching."""
+    tree, _ = _prepare(text, df.columns)
+    if not isinstance(tree.body, ast.Compare):
+        raise ValueError(f"'{text}' isn't a comparison: use > >= < <= == !=.")
+    return evaluate_formula(df, text).fillna(0).astype(bool)
 
 
 def formula_code(formula: str, columns, frame: str = "df") -> str:

@@ -50,9 +50,15 @@ def _clean_numeric(args, target):
     col = args.get("column")
     return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
 def apply(df, learned):
-    # Keep only digits, dots and minus signs ("$1,200" -> "1200"), then convert to numbers
-    text = df[{col!r}].astype(str).str.replace(r"[^\\d.\\-]", "", regex=True)
-    df[{col!r}] = pd.to_numeric(text, errors="coerce")
+    text = df[{col!r}].astype(str)
+    # A range like "2100 - 2850" becomes its midpoint
+    ends = text.str.extract(r"^\\s*(\\d[\\d,]*\\.?\\d*)\\s*-\\s*(\\d[\\d,]*\\.?\\d*)\\s*$")
+    low = pd.to_numeric(ends[0].str.replace(",", ""), errors="coerce")
+    high = pd.to_numeric(ends[1].str.replace(",", ""), errors="coerce")
+    # Anything else: keep only digits, dots and minus signs ("$1,200" -> 1200, "2 BHK" -> 2)
+    plain = pd.to_numeric(text.str.replace(r"[^\\d.\\-]", "", regex=True), errors="coerce").where(df[{col!r}].notna())
+    is_range = low.notna() & high.notna()
+    df[{col!r}] = ((low + high) / 2).where(is_range, plain) if is_range.any() else plain
     return df
 ''')
 
@@ -157,6 +163,51 @@ def apply(df, learned):
     # {formula}   (row by row: the same on training rows, test rows and new customers)
     df[{name!r}] = ({expression}).replace([np.inf, -np.inf], np.nan)
     return df
+''')
+
+
+@builder("group_rare_categories")
+def _group_rare(args, target):
+    col, max_rows, label = args.get("column"), int(args.get("max_rows") or 10), args.get("label") or "other"
+    return _code(f'''
+def learn(train):
+    # Which values are common enough to keep: counted on the TRAINING rows only
+    counts = train[{col!r}].dropna().astype(str).str.strip().value_counts()
+    return {{"keep": sorted(counts[counts > {max_rows}].index)}}
+
+
+def apply(df, learned):
+    values = df[{col!r}].astype(str).str.strip().where(df[{col!r}].notna())
+    # Rare values, and values never seen in training, become {label!r}
+    df[{col!r}] = values.where(values.isin(learned["keep"]) | values.isna(), {label!r})
+    return df
+''')
+
+
+@builder("remove_outliers")
+def _remove_outliers(args, target):
+    from app.expressions import formula_code
+    columns = args.get("_columns")
+    value = args.get("value", "")
+    value_code = formula_code(value, columns.columns, frame="df") if columns is not None else f"<value: {value}>"
+    method = args.get("method") or "std"
+    k = float(args["threshold"]) if args.get("threshold") not in (None, "") else (3.0 if method == "std" else 1.5)
+    group = args.get("group_by")
+    groups = f"df[{group!r}].astype(str)" if group else 'pd.Series("all", index=df.index)'
+    if method == "std":
+        bounds = (f"center, spread = grouped.transform('mean'), grouped.transform('std')\n"
+                  f"    low, high = center - {k} * spread, center + {k} * spread")
+    else:
+        bounds = (f"q1, q3 = grouped.transform(lambda v: v.quantile(0.25)), grouped.transform(lambda v: v.quantile(0.75))\n"
+                  f"    low, high = q1 - {k} * (q3 - q1), q3 + {k} * (q3 - q1)")
+    return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
+def apply(df, learned):
+    # TRAINING ROWS ONLY: you still have to predict for test rows and new customers
+    value = ({value_code}).replace([np.inf, -np.inf], np.nan)  # {value}
+    grouped = value.groupby({groups})
+    {bounds}
+    keep = value.isna() | low.isna() | high.isna() | value.between(low, high)
+    return df[keep].reset_index(drop=True)
 ''')
 
 

@@ -68,6 +68,28 @@ recipe_tool(
 )
 
 recipe_tool(
+    "group_rare_categories",
+    "Merge rare values of a text feature into one label ('other'), e.g. locations with 10 or fewer rows. "
+    "Which values are common is learned from the training rows.",
+    {"column": COLUMN,
+     "max_rows": {"type": "integer", "description": "Values in this many training rows or fewer are merged (default 10)."},
+     "label": {"type": "string", "description": "Name for the merged group (default 'other')."}},
+    ["column"],
+)
+
+recipe_tool(
+    "remove_outliers",
+    "Drop TRAINING rows whose value is extreme within its group, e.g. price / total_sqft more than 1 "
+    "standard deviation from its location's mean. The value may use the target (it only filters training rows).",
+    {"value": {"type": "string",
+               "description": "What to check: a name or formula, e.g. price or price / total_sqft."},
+     "group_by": {"type": "string", "description": "Optional: compare within each group of this column, e.g. location."},
+     "method": {"type": "string", "enum": ["std", "iqr"]},
+     "threshold": {"type": "number", "description": "How many standard deviations (default 3) or IQRs (default 1.5)."}},
+    ["value"],
+)
+
+recipe_tool(
     "add_column",
     "Create a new feature from a formula of existing numeric ones, e.g. total_sqft / bath.",
     {"name": {"type": "string", "description": "Name for the new feature."},

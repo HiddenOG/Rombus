@@ -57,6 +57,29 @@ Export the cleaned data (CSV/Excel), the trained model (`.pkl`, bundled with the
 **whole pipeline as a runnable Python script**. A test checks that the exported script reproduces
 the app's cleaned training and test rows exactly, custom code steps included.
 
+## Case study: a public house-price notebook, rebuilt honestly
+
+A widely shared Bengaluru house-price notebook (13,320 listings) cleans the data, removes price
+outliers, adds features, then splits and trains a Random Forest. I rebuilt every step in this app and
+scored the same model three ways on the same data:
+
+| How | Test R² |
+|---|---|
+| The notebook's way: `price_per_sqft` (price ÷ area) used as a feature | **0.98** |
+| The notebook's way without that feature: outliers still removed from *all* rows before the split | 0.79 |
+| This app: split first, outliers removed from training rows only, honest final exam | **0.55** |
+
+- **0.98 is leakage.** `price_per_sqft` is built from the price itself, so the model is handed the
+  answer. It can't exist for a new house, whose price is unknown. The app refuses to build a feature
+  from the target.
+- **0.79 is still flattered.** Removing price outliers *before* splitting cleans the test set too, so
+  the model is only examined on "typical" houses. In the app, outlier rules apply to training rows
+  only; the locked test rows stay as real listings come.
+- **0.55 is what the model really does** on listings it has never seen, extremes included.
+
+The cleaning itself is the same in all three (ranges like "2100 - 2850" averaged, rare locations
+grouped into "other", per-location outlier rules). Only *when* and *on which rows* it happens differs.
+
 ## Does the AI give good advice? Measured, not assumed
 
 `backend/evals/copilot_eval.py` asks the copilot to suggest the next step across 9 situations
