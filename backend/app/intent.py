@@ -112,6 +112,10 @@ ON_REQUEST = {
     "change_type": r"type|convert\w*|astype|int\w*|float|numer\w*|whole number|text|string",
     "rename_column": r"renam\w*|name",
     "fill_value": r"fill\w*|replac\w*|impute|blank|null|nan|missing|zero|unknown",
+    "replace_values": r"replac\w*|chang\w*|swap|turn|map\w*|recod\w*|n/a|yes|no\b|\bto\b|→|->",
+    "strip_characters": r"strip\w*|remov\w*|clean\w*|trim\w*|charact\w*|symbol|punctuat\w*|underscore|slash|dot",
+    "format_text": r"format\w*|phone|number|digit|pattern|layout|standardi[sz]\w*|clean\w*",
+    "split_column": r"split\w*|separat\w*|break\w*|divid\w*|into|address",
 }
 
 

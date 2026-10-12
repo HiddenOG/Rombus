@@ -68,6 +68,40 @@ recipe_tool(
 )
 
 recipe_tool(
+    "replace_values",
+    "Replace a value with another (Yes → Y) or with a blank (N/a → blank), in one column or every text one.",
+    {"column": {"type": "string", "description": "Column to change (leave out for every text column)."},
+     "find": {"type": "string", "description": "The value to look for, e.g. Yes or N/a."},
+     "replace_with": {"type": "string", "description": "The new value; leave empty for a blank."},
+     "match": {"type": "string", "enum": ["whole value", "part of text"]}},
+    ["find"],
+)
+
+recipe_tool(
+    "strip_characters",
+    "Remove chosen characters (e.g. ._/) from the ends of text values, or from anywhere in them.",
+    {"column": COLUMN, "characters": {"type": "string", "description": "The characters to remove, e.g. ._/"},
+     "where": {"type": "string", "enum": ["ends", "anywhere"]}},
+    ["column", "characters"],
+)
+
+recipe_tool(
+    "format_text",
+    "Keep only digits or letters, then optionally lay them out with a pattern: phone numbers to ###-###-####.",
+    {"column": COLUMN, "keep": {"type": "string", "enum": ["digits", "letters", "letters and digits"]},
+     "pattern": {"type": "string", "description": "Optional layout, one # per kept character, e.g. ###-###-####."}},
+    ["column"],
+)
+
+recipe_tool(
+    "split_column",
+    "Split a text column on a separator into new columns, e.g. an address into street, state and zip.",
+    {"column": COLUMN, "into": {"type": "string", "description": "Names for the new parts, comma-separated: Street, State, Zip."},
+     "separator": {"type": "string", "description": "What separates the parts (default a comma)."}},
+    ["column", "into"],
+)
+
+recipe_tool(
     "group_rare_categories",
     "Merge rare values of a text feature into one label ('other'), e.g. locations with 10 or fewer rows. "
     "Which values are common is learned from the training rows.",

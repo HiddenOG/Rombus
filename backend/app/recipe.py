@@ -457,6 +457,177 @@ class AddColumn(Step):
         return msg
 
 
+# ── Text fixes (row by row: nothing learned, the same on every row set) ─────────
+
+BLANK_WORDS = ("", "blank", "(blank)", "nothing", "none", "null", "nan")
+
+
+@step_type("replace_values")
+class ReplaceValues(Step):
+    """Replace a value with another (Yes → Y), or with a blank (N/a → blank). Matches the whole
+    value by default, or any part of the text. One column, or every text column."""
+    kind = "fixed"
+
+    def _columns(self, df) -> List[str]:
+        if self.args.get("column"):
+            return [self.args["column"]] if self.args["column"] in df.columns else []
+        from app.tools import categorical_columns
+        return [c for c in categorical_columns(df) if c != self.ctx.target]
+
+    def _replacement(self):
+        new = self.args.get("replace_with")
+        return None if new is None or str(new).strip().lower() in BLANK_WORDS else str(new)
+
+    def learn(self, train):
+        if self.args.get("column"):
+            self._require_column(train, self.args["column"])
+        if self.args.get("find") in (None, ""):
+            raise ValueError("Say which value to find.")
+        if self.args.get("match", "whole value") not in ("whole value", "part of text"):
+            raise ValueError("Match must be 'whole value' or 'part of text'.")
+        return {}
+
+    def apply(self, df, learned):
+        find, new = str(self.args["find"]), self._replacement()
+        whole = self.args.get("match", "whole value") == "whole value"
+        for col in self._columns(df):
+            text = df[col].astype(str).str.strip()
+            if whole:
+                hit = (text.str.lower() == find.strip().lower()) & df[col].notna()
+                df[col] = df[col].where(~hit, new if new is not None else np.nan)
+            else:
+                replaced = df[col].astype(str).str.replace(find, new or "", regex=False)
+                changed = df[col].notna() & (replaced != df[col].astype(str))
+                cleaned = replaced.where(replaced.str.strip() != "", np.nan)  # emptied text becomes a blank
+                df[col] = df[col].where(~changed, cleaned)
+        return df
+
+    def summary(self, before, after, learned):
+        cols = self._columns(before)
+        changed = sum(int((before[c].astype(str) != after[c].astype(str)).sum()) for c in cols if c in after)
+        new = self._replacement()
+        where = f"'{cols[0]}'" if self.args.get("column") else f"{len(cols)} text columns"
+        return f"Replaced '{self.args['find']}' with {repr(new) if new is not None else 'a blank'} in {where}: {changed} values changed."
+
+
+@step_type("strip_characters")
+class StripCharacters(Step):
+    """Remove chosen characters (e.g. ._/) from the ends of a text value, or from anywhere in it."""
+    kind = "fixed"
+
+    def learn(self, train):
+        self._require_column(train, self.args.get("column"))
+        if not self.args.get("characters"):
+            raise ValueError("Say which characters to remove, e.g. ._/")
+        if self.args.get("where", "ends") not in ("ends", "anywhere"):
+            raise ValueError("Where must be 'ends' or 'anywhere'.")
+        return {}
+
+    def apply(self, df, learned):
+        col, chars = self.args["column"], str(self.args["characters"])
+        if col in df.columns:
+            text = df[col].astype(str)
+            if self.args.get("where", "ends") == "anywhere":
+                text = text.str.translate(str.maketrans("", "", chars))
+            else:
+                text = text.str.strip(chars + " ")
+            df[col] = text.where(df[col].notna())
+        return df
+
+    def summary(self, before, after, learned):
+        col = self.args["column"]
+        changed = int((before[col].astype(str) != after[col].astype(str)).sum())
+        where = "anywhere in" if self.args.get("where") == "anywhere" else "the ends of"
+        return f"Removed {self.args['characters']!r} from {where} '{col}': {changed} values changed."
+
+
+@step_type("format_text")
+class FormatText(Step):
+    """Keep only some characters (digits, letters), then optionally lay them out with a pattern:
+    "(123) 456/7890" → keep digits → "1234567890" → pattern ###-###-#### → "123-456-7890".
+    A value with nothing left (e.g. "N/a" when keeping digits) becomes a blank."""
+    kind = "fixed"
+    KEEP = {"digits": r"[^0-9]", "letters": r"[^A-Za-z]", "letters and digits": r"[^A-Za-z0-9]"}
+
+    def learn(self, train):
+        self._require_column(train, self.args.get("column"))
+        if self.args.get("keep", "digits") not in self.KEEP:
+            raise ValueError(f"Keep must be one of: {', '.join(self.KEEP)}.")
+        pattern = self.args.get("pattern") or ""
+        if pattern and "#" not in pattern:
+            raise ValueError("A pattern uses # for each character, e.g. ###-###-####.")
+        return {}
+
+    def _format(self, value: str) -> Any:
+        pattern = self.args.get("pattern") or ""
+        if not isinstance(value, str) or not value:
+            return np.nan  # a blank, or nothing left after keeping
+        slots = pattern.count("#")
+        if not pattern or len(value) < slots:
+            return value  # too short for the pattern: left as the kept characters
+        chars, out = iter(value[:slots]), []
+        for p in pattern:
+            out.append(next(chars) if p == "#" else p)
+        return "".join(out)
+
+    def apply(self, df, learned):
+        col = self.args["column"]
+        if col in df.columns:
+            kept = df[col].astype(str).str.replace(self.KEEP[self.args.get("keep", "digits")], "", regex=True)
+            df[col] = kept.map(self._format).where(df[col].notna())
+        return df
+
+    def summary(self, before, after, learned):
+        col, pattern = self.args["column"], self.args.get("pattern")
+        blanks = int(after[col].isna().sum() - before[col].isna().sum())
+        msg = f"Kept only {self.args.get('keep', 'digits')} in '{col}'" + (f", laid out as {pattern}" if pattern else "") + "."
+        if pattern:
+            slots = pattern.count("#")
+            short = int(after[col].dropna().astype(str).str.len().lt(len(pattern)).sum())
+            if short:
+                msg += f" {short} values had fewer than {slots} characters and were left unformatted."
+        if blanks:
+            msg += f" {blanks} values had nothing left and became blanks."
+        return msg
+
+
+@step_type("split_column")
+class SplitColumn(Step):
+    """Split a text column on a separator into new columns: "1 Main St, NY, 10001" → street, state, zip.
+    The last new column takes the rest if there are more pieces than names."""
+    kind = "fixed"
+
+    def _names(self) -> List[str]:
+        return [n.strip() for n in str(self.args.get("into") or "").split(",") if n.strip()]
+
+    def learn(self, train):
+        col = self._require_column(train, self.args.get("column"))
+        names = self._names()
+        if len(names) < 2:
+            raise ValueError("Give at least two names for the new columns, separated by commas, e.g. Street, State, Zip.")
+        clash = [n for n in names if n in train.columns and n != col]
+        if clash:
+            raise ValueError(f"There are already columns called {', '.join(clash)}.")
+        if col == self.ctx.target:
+            raise ValueError("The column you're predicting can't be split.")
+        return {}
+
+    def apply(self, df, learned):
+        col, names = self.args["column"], self._names()
+        if col in df.columns:
+            separator = self.args.get("separator") or ","
+            parts = df[col].astype(str).where(df[col].notna()).str.split(separator, n=len(names) - 1, regex=False, expand=True)
+            for i, name in enumerate(names):
+                piece = parts[i] if i in parts.columns else pd.Series(np.nan, index=df.index)
+                df[name] = piece.str.strip().replace("", np.nan)
+        return df
+
+    def summary(self, before, after, learned):
+        names = self._names()
+        filled = ", ".join(f"{n} ({int(after[n].notna().sum())} filled)" for n in names)
+        return f"Split '{self.args['column']}' on {self.args.get('separator') or ','!r} into {filled}. The original column is kept."
+
+
 @step_type("group_rare_categories")
 class GroupRareCategories(Step):
     """Values seen in at most `max_rows` training rows become one label ('other'), e.g. the many

@@ -166,6 +166,79 @@ def apply(df, learned):
 ''')
 
 
+@builder("replace_values")
+def _replace_values(args, target):
+    from app.recipe import BLANK_WORDS
+    find = str(args.get("find", ""))
+    raw_new = args.get("replace_with")
+    new = None if raw_new is None or str(raw_new).strip().lower() in BLANK_WORDS else str(raw_new)
+    new_code = repr(new) if new is not None else "np.nan"
+    if args.get("column"):
+        columns = repr([args["column"]])
+    else:  # every text column
+        columns = f"[c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c]) and c != {target!r}]"
+    if args.get("match", "whole value") == "whole value":
+        body = f'''
+        hit = (df[col].astype(str).str.strip().str.lower() == {find.strip().lower()!r}) & df[col].notna()
+        df[col] = df[col].where(~hit, {new_code})'''
+    else:
+        body = f'''
+        replaced = df[col].astype(str).str.replace({find!r}, {(new or "")!r}, regex=False)
+        changed = df[col].notna() & (replaced != df[col].astype(str))
+        df[col] = df[col].where(~changed, replaced.where(replaced.str.strip() != "", np.nan))'''
+    return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
+def apply(df, learned):
+    for col in {columns}:''') + body + "\n    return df"
+
+
+@builder("strip_characters")
+def _strip_characters(args, target):
+    col, chars = args.get("column"), str(args.get("characters", ""))
+    line = (f"df[{col!r}].astype(str).str.translate(str.maketrans('', '', {chars!r}))"
+            if args.get("where") == "anywhere" else f"df[{col!r}].astype(str).str.strip({chars + ' '!r})")
+    return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
+def apply(df, learned):
+    df[{col!r}] = {line}.where(df[{col!r}].notna())
+    return df
+''')
+
+
+@builder("format_text")
+def _format_text(args, target):
+    from app.recipe import FormatText
+    col, keep, pattern = args.get("column"), args.get("keep", "digits"), args.get("pattern") or ""
+    return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
+def apply(df, learned):
+    kept = df[{col!r}].astype(str).str.replace({FormatText.KEEP[keep]!r}, "", regex=True)  # keep only {keep}
+
+    def layout(value, pattern={pattern!r}):
+        if not isinstance(value, str) or not value:
+            return np.nan  # a blank, or nothing left: a blank
+        if not pattern or len(value) < pattern.count("#"):
+            return value  # too short for the pattern: left as it is
+        chars = iter(value[:pattern.count("#")])
+        return "".join(next(chars) if p == "#" else p for p in pattern)
+
+    df[{col!r}] = kept.map(layout).where(df[{col!r}].notna())
+    return df
+''')
+
+
+@builder("split_column")
+def _split_column(args, target):
+    col, separator = args.get("column"), args.get("separator") or ","
+    names = [n.strip() for n in str(args.get("into") or "").split(",") if n.strip()]
+    return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
+def apply(df, learned):
+    names = {names!r}
+    parts = df[{col!r}].astype(str).where(df[{col!r}].notna()).str.split({separator!r}, n=len(names) - 1, regex=False, expand=True)
+    for i, name in enumerate(names):
+        piece = parts[i] if i in parts.columns else pd.Series(np.nan, index=df.index)
+        df[name] = piece.str.strip().replace("", np.nan)
+    return df  # the original column is kept
+''')
+
+
 @builder("group_rare_categories")
 def _group_rare(args, target):
     col, max_rows, label = args.get("column"), int(args.get("max_rows") or 10), args.get("label") or "other"
