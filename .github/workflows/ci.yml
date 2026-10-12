@@ -53,11 +53,11 @@ jobs:
     needs: [backend, frontend]
     steps:
       - uses: actions/checkout@v5
-      - run: docker build -t automl-backend ./backend
-      - run: docker build -t automl-frontend ./frontend
+      - run: docker build -t rhombus-backend ./backend
+      - run: docker build -t rhombus-frontend ./frontend
       - name: Backend container starts and answers
         run: |
-          docker run -d --name api -e PORT=8000 -p 8000:8000 automl-backend
+          docker run -d --name api -e PORT=8000 -p 8000:8000 rhombus-backend
           for i in $(seq 1 30); do curl -fs localhost:8000/api/health && exit 0; sleep 2; done
           docker logs api; exit 1
 

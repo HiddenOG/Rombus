@@ -49,7 +49,7 @@ def pipeline_script(session: DataSession) -> str:
     stratify = f"df[{target!r}]" if _stratifies(session, size) else "None"
     steps = session.recipe
 
-    parts = [f'''"""Data-cleaning pipeline exported from AutoML Copilot.
+    parts = [f'''"""Data-cleaning pipeline exported from Rhombus.
 
 Dataset: {session.filename}
 Target:  {target}
@@ -134,7 +134,7 @@ def _cleaning_script(session: DataSession) -> str:
     """Clean-only notebooks: every step on the whole file, no split (there's no model to test)."""
     steps = session.recipe
     stem = re.sub(r"[^A-Za-z0-9_.-]", "_", session.filename.rsplit(".", 1)[0])
-    parts = [f'''"""Data-cleaning script exported from AutoML Copilot (clean-only notebook).
+    parts = [f'''"""Data-cleaning script exported from Rhombus (clean-only notebook).
 
 Dataset: {session.filename}
 Steps:   {len(steps)} ({", ".join(l.tool for l in steps) or "none"})

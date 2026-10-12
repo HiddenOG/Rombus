@@ -83,9 +83,9 @@ class BodySizeLimit:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="AutoML Platform — AI Data Science Copilot",
+        title="Rhombus — data science you can trust",
         version="3.0",
-        description="AI-powered interactive data science copilot following the ASEMIC workflow.",
+        description="Rhombus API: a data science notebook with an AI copilot, following the ASEMIC workflow.",
         lifespan=lifespan,
         default_response_class=SafeJSONResponse,
     )

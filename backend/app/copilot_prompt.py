@@ -20,7 +20,7 @@ MAX_SUGGESTIONS = 3
 HISTORY_MESSAGES = 10
 
 STATIC_INSTRUCTIONS = f"""
-You are an expert Data Science Copilot following the ASEMIC workflow.
+You are Rhombus, an expert data science copilot following the ASEMIC workflow.
 
 ASEMIC WORKFLOW REFERENCE:
 {ASEMIC_WORKFLOW}

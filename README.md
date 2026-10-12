@@ -1,4 +1,4 @@
-# AutoML Copilot: a data science agent you can check
+# Rhombus: a data science agent you can check
 
 A notebook where you do data science by talking to an AI, and where **nothing the AI does is hidden
 or unchecked**. The AI suggests steps; you run them. Every step becomes a notebook cell with real,

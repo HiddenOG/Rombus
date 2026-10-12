@@ -22,7 +22,7 @@ export function Sidebar({ open, onClose, sessionId, summary, onFileUpload, isPro
             <div className="shrink-0 h-16 px-5 flex items-center gap-3 border-b border-line">
                 <Logo size={36} className="drop-shadow-sm" />
                 <div className="min-w-0 flex-1 leading-tight">
-                    <h1 className="text-[15px] font-bold text-ink">AutoML Copilot</h1>
+                    <h1 className="text-[15px] font-bold text-ink">Rhombus</h1>
                     <p className="text-xs text-ink-3">Data science you can trust</p>
                 </div>
                 <button onClick={onClose} title="Close sidebar" aria-label="Close sidebar" className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-ink">

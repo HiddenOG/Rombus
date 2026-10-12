@@ -1,4 +1,4 @@
-"""AutoML Platform — Entry Point."""
+"""Rhombus — Entry Point."""
 
 import uvicorn
 
