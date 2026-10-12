@@ -93,6 +93,9 @@ class Line:
     learned: Dict[str, Any] = field(default_factory=dict)
     message: str = ""
     id: str = field(default_factory=_new_id)
+    # The columns and types this line saw last time it ran (no rows): lets its code be written
+    # with the right column references and value types. Not saved; replaying fills it in again.
+    schema: Optional[pd.DataFrame] = field(default=None, repr=False, compare=False)
 
     def to_json(self) -> Dict[str, Any]:
         return {"id": self.id, "tool": self.tool, "args": self.args}
@@ -101,6 +104,7 @@ class Line:
 def run_line(line: Line, df: pd.DataFrame, ctx: Context) -> pd.DataFrame:
     """Learn from these (training) rows, apply, and record the sticky note and a summary."""
     step = STEP_TYPES[line.tool](line.args, ctx)
+    line.schema = df.head(0)
     line.learned = step.learn(df)
     after = step.apply(df.copy(), line.learned)
     line.message = step.summary(df, after, line.learned)
@@ -256,11 +260,173 @@ class DropMissingRows(Step):
                       "so their blanks need a fill step, or they'll be filled with 0 when predicting.")
 
 
+@step_type("drop_rows_where")
+class DropRowsWhere(Step):
+    """Drop training rows matching a condition (e.g. outliers: price > 10000).
+
+    Training rows only, like dropping duplicates: a model may learn better without odd rows, but you
+    can't refuse to predict for an odd customer, so the test rows keep theirs (an honest exam).
+    """
+    kind = "train_only"
+
+    def learn(self, train):
+        from app.expressions import parse_filter
+        parse_filter(train, self.args.get("conditions", ""))  # check it reads before anything runs
+        return {}
+
+    def apply(self, df, learned):
+        from app.expressions import parse_filter
+        drop, _ = parse_filter(df, self.args["conditions"])
+        return df[~drop].reset_index(drop=True)
+
+    def summary(self, before, after, learned):
+        from app.expressions import parse_filter
+        _, described = parse_filter(before, self.args["conditions"])
+        dropped = len(before) - len(after)
+        msg = f"Dropped {dropped} training rows where {described}. Row count: {len(before)} → {len(after)}."
+        if dropped / max(len(before), 1) > 0.2:
+            msg += f" That's {dropped / len(before):.0%} of the training rows: is the condition right?"
+        return msg + " Test rows and new customers keep theirs: you still have to predict for them."
+
+
+@step_type("change_type")
+class ChangeType(Step):
+    """astype: number (decimal), whole number, or text. Values that can't convert become blanks."""
+    kind = "fixed"
+    TYPES = ("number", "whole number", "text")
+
+    def learn(self, train):
+        self._require_column(train, self.args.get("column"))
+        if self.args.get("to") not in self.TYPES:
+            raise ValueError(f"Convert to one of: {', '.join(self.TYPES)}.")
+        if self.args["column"] == self.ctx.target:
+            raise ValueError("The target column's type is set when it's chosen; change the other columns.")
+        return {}
+
+    def apply(self, df, learned):
+        col, to = self.args["column"], self.args["to"]
+        if col in df.columns:
+            if to == "text":
+                df[col] = df[col].astype(str).where(df[col].notna())
+            else:
+                values = pd.to_numeric(df[col], errors="coerce")
+                df[col] = values.round().astype("Int64") if to == "whole number" else values.astype(float)
+        return df
+
+    def summary(self, before, after, learned):
+        col = self.args["column"]
+        lost = int(after[col].isna().sum() - before[col].isna().sum())
+        msg = f"Changed '{col}' to {self.args['to']}: {before[col].dtype} → {after[col].dtype}."
+        if lost > 0:
+            msg += f" {lost} values couldn't be converted and became blanks."
+        return msg
+
+
+@step_type("rename_column")
+class RenameColumn(Step):
+    kind = "fixed"
+
+    def learn(self, train):
+        col = self._require_column(train, self.args.get("column"))
+        new = (self.args.get("new_name") or "").strip()
+        if not new:
+            raise ValueError("Give the new name.")
+        if col == self.ctx.target:
+            raise ValueError("The target column can't be renamed (the lock, the exam and predictions refer to it).")
+        if new in train.columns and new != col:
+            raise ValueError(f"There's already a column called '{new}'.")
+        return {}
+
+    def apply(self, df, learned):
+        return df.rename(columns={self.args["column"]: self.args["new_name"].strip()})
+
+    def summary(self, before, after, learned):
+        return f"Renamed '{self.args['column']}' to '{self.args['new_name'].strip()}'."
+
+
+@step_type("fill_value")
+class FillValue(Step):
+    """fillna with a value you choose (0, 'unknown', …). Nothing is learned: the same value everywhere."""
+    kind = "fixed"
+
+    def _value(self, series):
+        raw = self.args.get("value")
+        if pd.api.types.is_numeric_dtype(series):
+            try:
+                number = float(raw)
+            except (TypeError, ValueError):
+                raise ValueError(f"'{series.name}' holds numbers, so fill it with a number (not '{raw}').")
+            if pd.api.types.is_integer_dtype(series):
+                if number != round(number):
+                    raise ValueError(f"'{series.name}' holds whole numbers, so fill it with a whole number.")
+                return int(number)
+            return number
+        return str(raw)
+
+    def learn(self, train):
+        col = self._require_column(train, self.args.get("column"))
+        if self.args.get("value") in (None, ""):
+            raise ValueError("Give the value to fill blanks with.")
+        self._value(train[col])
+        return {}
+
+    def apply(self, df, learned):
+        col = self.args["column"]
+        if col in df.columns:
+            df[col] = df[col].fillna(self._value(df[col]))
+        return df
+
+    def summary(self, before, after, learned):
+        col = self.args["column"]
+        return f"Filled {int(before[col].isna().sum())} blanks in '{col}' with {self._value(before[col])!r}."
+
+
+@step_type("add_column")
+class AddColumn(Step):
+    """A new column from a formula of existing ones (feature engineering), e.g. QUANTITY * PRICE.
+
+    Row by row, so nothing is learned from other rows: it's the same on training rows, test rows and
+    new customers. The formula is read safely by app/expressions.py, never run as Python.
+    """
+    kind = "fixed"
+
+    def learn(self, train):
+        from app.expressions import evaluate_formula
+        name = (self.args.get("name") or "").strip()
+        if not name:
+            raise ValueError("Give the new column a name.")
+        if name in train.columns:
+            raise ValueError(f"There's already a column called '{name}'.")
+        evaluate_formula(self._without_target(train), self.args.get("formula", ""))
+        return {}
+
+    def _without_target(self, df):
+        # The answer must never feed a feature: the model wouldn't have it when predicting
+        return df.drop(columns=[self.ctx.target], errors="ignore")
+
+    def apply(self, df, learned):
+        from app.expressions import evaluate_formula
+        df[self.args["name"].strip()] = evaluate_formula(self._without_target(df), self.args["formula"])
+        return df
+
+    def summary(self, before, after, learned):
+        name = self.args["name"].strip()
+        values = after[name]
+        msg = f"Added '{name}' = {self.args['formula']}. Mean {values.mean():.4g}, range {values.min():.4g} to {values.max():.4g}."
+        blanks = int(values.isna().sum())
+        if blanks:
+            msg += f" {blanks} rows are blank (a blank input, or dividing by zero)."
+        return msg
+
+
 # ── Learning steps ──────────────────────────────────────────────────────────────
 
 def _fill_value(series: pd.Series, strategy: str) -> Any:
     if strategy in ("mean", "median"):
         value = series.mean() if strategy == "mean" else series.median()
+        if pd.api.types.is_integer_dtype(series):
+            # A whole-number column (e.g. rooms, after "change type") gets a whole number: 1.88 rooms -> 2
+            return int(round(float(value)))
         return round(float(value), 6)
     mode = series.mode()
     if mode.empty:

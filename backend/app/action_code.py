@@ -77,8 +77,9 @@ def _preview(session, args):
 
 @builder("filter_rows")
 def _filter(session, args):
+    from app.expressions import filter_code
     try:
-        expression = _pandas_mask(session, args.get("conditions", ""))
+        expression = filter_code(session.df, args.get("conditions", ""), frame="train")
     except ValueError as e:
         return HEADER + f"# Couldn't read the conditions: {e}"
     return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + _code(f'''
@@ -87,38 +88,6 @@ mask = {expression}
 print(f"{{mask.sum()}} of {{len(train)}} rows match")
 result = train[mask]
 ''')
-
-
-def _pandas_mask(session, text: str) -> str:
-    """The filter as plain pandas, built from the same parser the app uses."""
-    from app.tools.analysis import _condition
-    import re
-    alternatives = []
-    for alternative in re.split(r"\s+or\s+", text.strip(), flags=re.IGNORECASE):
-        parts = []
-        for piece in re.split(r"\s+and\s+", alternative, flags=re.IGNORECASE):
-            _, described = _condition(session.df, piece)  # validates, and normalises the wording
-            parts.append(_mask_code(session.df, piece, described))
-        alternatives.append(" & ".join(parts))
-    return " | ".join(f"({a})" if len(alternatives) > 1 else a for a in alternatives)
-
-
-def _mask_code(df, piece: str, described: str) -> str:
-    from app.tools.analysis import _OPERATORS, _parse_value
-    col = next(c for c in sorted(df.columns, key=lambda c: -len(str(c))) if described.startswith(str(c)))
-    rest = described[len(str(col)):].strip()
-    ref = f"train[{col!r}]"
-    if rest == "is blank":
-        return f"{ref}.isna()"
-    if rest == "is not blank":
-        return f"{ref}.notna()"
-    op = next(o for o in _OPERATORS if rest.startswith(o))
-    value = _parse_value(rest[len(op):], df[col] if "contains" not in op else pd.Series(dtype=str))
-    if "contains" in op:
-        code = f"{ref}.astype(str).str.contains({value!r}, case=False, regex=False)"
-        return f"~{code}" if op.startswith("not") else f"({code})"
-    py_op = "==" if op == "=" else op
-    return f"({ref} {py_op} {value!r})"
 
 
 @builder("group_summary")

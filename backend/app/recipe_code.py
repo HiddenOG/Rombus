@@ -8,6 +8,8 @@ import json
 from textwrap import dedent, indent
 from typing import Any, Callable, Dict, Optional
 
+import pandas as pd
+
 from app.recipe import Line
 
 Builder = Callable[[Dict[str, Any], Optional[str]], str]
@@ -95,21 +97,88 @@ def apply(df, learned):
 ''')
 
 
-def _fill_expr(col: str, strategy: str) -> str:
-    return {
+@builder("drop_rows_where")
+def _drop_rows_where(args, target):
+    from app.expressions import filter_code
+    conditions = args.get("conditions", "")
+    columns = args.get("_columns")  # filled in by step_code: the columns this step sees
+    mask = filter_code(columns, conditions, frame="df") if columns is not None else f"<conditions: {conditions}>"
+    return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
+def apply(df, learned):
+    # TRAINING ROWS ONLY: you still have to predict for test rows and new customers like these
+    drop = {mask}  # {conditions}
+    return df[~drop].reset_index(drop=True)
+''')
+
+
+@builder("change_type")
+def _change_type(args, target):
+    col, to = args.get("column"), args.get("to")
+    line = {
+        "text": f"df[{col!r}] = df[{col!r}].astype(str).where(df[{col!r}].notna())  # keep blanks blank",
+        "whole number": f"df[{col!r}] = pd.to_numeric(df[{col!r}], errors='coerce').round().astype('Int64')",
+    }.get(to, f"df[{col!r}] = pd.to_numeric(df[{col!r}], errors='coerce')  # unconvertible values become blanks")
+    return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
+def apply(df, learned):
+    {line}
+    return df
+''')
+
+
+@builder("rename_column")
+def _rename(args, target):
+    return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
+def apply(df, learned):
+    return df.rename(columns={{{args.get("column")!r}: {(args.get("new_name") or "").strip()!r}}})
+''')
+
+
+@builder("fill_value")
+def _fill_value(args, target):
+    col, value = args.get("column"), args.get("value")
+    columns = args.get("_columns")
+    if columns is not None and col in columns and pd.api.types.is_numeric_dtype(columns[col]):
+        value = int(float(value)) if pd.api.types.is_integer_dtype(columns[col]) else float(value)
+    return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
+def apply(df, learned):
+    df[{col!r}] = df[{col!r}].fillna({value!r})  # the same value everywhere: nothing to learn
+    return df
+''')
+
+
+@builder("add_column")
+def _add_column(args, target):
+    from app.expressions import formula_code
+    name, formula = (args.get("name") or "").strip(), args.get("formula", "")
+    columns = args.get("_columns")
+    expression = formula_code(formula, columns.columns, frame="df") if columns is not None else f"<formula: {formula}>"
+    return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
+def apply(df, learned):
+    # {formula}   (row by row: the same on training rows, test rows and new customers)
+    df[{name!r}] = ({expression}).replace([np.inf, -np.inf], np.nan)
+    return df
+''')
+
+
+def _fill_expr(col: str, strategy: str, whole: bool = False) -> str:
+    expr = {
         "mean": f"train[{col!r}].mean()",
         "median": f"train[{col!r}].median()",
         "mode": f"train[{col!r}].mode()[0]",
     }[strategy]
+    # A whole-number column gets a whole number (1.88 rooms -> 2), as in the app
+    return f"int(round({expr}))" if whole and strategy != "mode" else expr
 
 
 @builder("impute_missing")
 def _impute_missing(args, target):
     col, strategy = args.get("column"), args.get("strategy", "mean")
+    columns = args.get("_columns")
+    whole = columns is not None and col in columns and pd.api.types.is_integer_dtype(columns[col])
     return _code(f'''
 def learn(train):
     # The {strategy} of {col!r}, from the TRAINING rows only
-    return {{"fill": {{{col!r}: {_fill_expr(col, strategy)}}}}}
+    return {{"fill": {{{col!r}: {_fill_expr(col, strategy, whole)}}}}}
 
 
 def apply(df, learned):
@@ -128,6 +197,8 @@ def learn(train):
     for col in {_features(target)}:
         if pd.api.types.is_numeric_dtype(train[col]):
             fill[col] = {numeric_expr}
+            if pd.api.types.is_integer_dtype(train[col]) and {(strategy or "mean")!r} != "mode":
+                fill[col] = int(round(fill[col]))  # whole-number columns get a whole number
         else:
             fill[col] = train[col].mode()[0]  # most common value for text columns
     return {{"fill": fill}}
@@ -221,7 +292,8 @@ def step_code(line: Line, target: Optional[str], with_learned: bool = True) -> s
     if line.tool == "custom_code":
         code = build(line.args, target).rstrip()
     else:
-        code = "import numpy as np\nimport pandas as pd\n\n\n" + build(line.args, target)
+        # `_columns`: what the step saw (no rows), so the code uses the right columns and value types
+        code = "import numpy as np\nimport pandas as pd\n\n\n" + build({**line.args, "_columns": line.schema}, target)
     if not with_learned:
         return code
     if line.learned:

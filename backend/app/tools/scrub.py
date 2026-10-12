@@ -38,6 +38,46 @@ recipe_tool(
 )
 
 recipe_tool(
+    "drop_rows_where",
+    "Drop TRAINING rows matching a condition, e.g. outliers (test rows and new customers keep theirs).",
+    {"conditions": {"type": "string",
+                    "description": "e.g. price > 10000 or bath > 8. Operators: > >= < <= == != contains, "
+                                   "is blank; join with and / or."}},
+    ["conditions"],
+)
+
+recipe_tool(
+    "change_type",
+    "Convert a column's type, like astype: number, whole number or text (unconvertible values become blanks).",
+    {"column": COLUMN, "to": {"type": "string", "enum": ["number", "whole number", "text"]}},
+    ["column", "to"],
+)
+
+recipe_tool(
+    "rename_column",
+    "Rename a column.",
+    {"column": COLUMN, "new_name": {"type": "string", "description": "The new name."}},
+    ["column", "new_name"],
+)
+
+recipe_tool(
+    "fill_value",
+    "Fill a column's blanks with a fixed value you choose (e.g. 0 or 'unknown'), like fillna(value).",
+    {"column": COLUMN, "value": {"type": "string", "description": "The value to put in the blanks."}},
+    ["column", "value"],
+)
+
+recipe_tool(
+    "add_column",
+    "Create a new feature from a formula of existing numeric ones, e.g. total_sqft / bath.",
+    {"name": {"type": "string", "description": "Name for the new feature."},
+     "formula": {"type": "string",
+                 "description": "e.g. QUANTITY * PRICE or log(total_sqft). + - * / ** > <, numbers, and "
+                                "log log1p sqrt abs exp round floor ceil. Names with spaces in `backticks`."}},
+    ["name", "formula"],
+)
+
+recipe_tool(
     "clean_numeric_string",
     "Strip $, commas and other non-numeric characters from a column and convert it to numeric.",
     {"column": COLUMN},

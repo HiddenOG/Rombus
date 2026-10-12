@@ -57,9 +57,9 @@ INSTRUCTIONS:
 LOOK = ["preview_data", "get_data_info", "check_duplicates", "show_unique_values", "plot_missing",
         "filter_rows", "group_summary", "pivot_table",
         "plot_histogram", "plot_boxplot", "plot_correlation", "plot_scatterplot"]
-CLEAN = ["remove_columns", "remove_duplicates", "drop_missing_rows", "clean_numeric_string", "standardize_text",
-         "impute_missing", "impute_all_missing", "encode_categorical", "encode_all_categorical", "scale_all_features",
-         "log_transform"]
+CLEAN = ["remove_columns", "remove_duplicates", "drop_missing_rows", "drop_rows_where", "clean_numeric_string",
+         "standardize_text", "change_type", "rename_column", "fill_value", "impute_missing", "impute_all_missing",
+         "encode_categorical", "encode_all_categorical", "scale_all_features", "log_transform", "add_column"]
 MODEL = ["train_models", "auto_ml", "final_exam", "predict", "explain_model", "save_model"]
 
 PHASE_TOOLS = {

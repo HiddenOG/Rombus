@@ -1,18 +1,15 @@
 """Analysis views: the everyday pandas questions (filter, group & summarise, pivot).
 
 All look-only: they never change the data or the recipe, so they can't leak test rows into
-anything. Like every view, they see the training rows only.
-
-Filter conditions are read by a small parser, not pandas' df.query(): query() evaluates its text
-as an expression, which would let a visitor run code on the server.
+anything. Like every view, they see the training rows only. Filter conditions are read by
+app/expressions.py, never by df.query() (which would run the text as code).
 """
 
-import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
-import numpy as np
 import pandas as pd
 
+from app.expressions import parse_filter
 from app.session import DataSession
 from app.tools import COLUMN, register_tool, validate_column
 
@@ -28,92 +25,17 @@ def _table(df: pd.DataFrame) -> List[Dict[str, Any]]:
     return df.astype(object).where(df.notna(), None).to_dict(orient="records")
 
 
-def _rounded(df: pd.DataFrame) -> pd.DataFrame:
-    return df.round(4) if hasattr(df, "round") else df
-
-
 # ── Filter rows ──────────────────────────────────────────────────────────────────
 
-_OPERATORS = [">=", "<=", "!=", "==", "=", ">", "<", "not contains", "contains",
-              "is not blank", "is not null", "is not missing", "is blank", "is null", "is missing"]
-
-
-def _parse_value(text: str, series: pd.Series) -> Any:
-    text = text.strip()
-    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
-        return text[1:-1]
-    if pd.api.types.is_numeric_dtype(series):
-        try:
-            return float(text.replace(",", ""))
-        except ValueError:
-            raise ValueError(f"'{text}' isn't a number, but '{series.name}' holds numbers.")
-    if pd.api.types.is_bool_dtype(series):
-        return text.lower() in ("true", "yes", "1")
-    return text
-
-
-def _condition(df: pd.DataFrame, text: str) -> Tuple[pd.Series, str]:
-    """One condition, like `age > 30`, `size == "2 BHK"` or `society is blank`."""
-    text = text.strip()
-    # The column: longest name the condition starts with (names can contain spaces), or `backticked`
-    quoted = re.match(r"`([^`]+)`\s*(.*)$", text)
-    if quoted:
-        col, rest = quoted.group(1), quoted.group(2)
-        if col not in df.columns:
-            raise ValueError(f"Column '{col}' not found.")
-    else:
-        matches = [c for c in df.columns if text.lower().startswith(str(c).lower())]
-        if not matches:
-            raise ValueError(f"Couldn't find a column at the start of '{text}'. Columns: {', '.join(map(str, df.columns))}.")
-        col = max(matches, key=lambda c: len(str(c)))
-        rest = text[len(str(col)):]
-    rest = rest.strip()
-    op = next((o for o in _OPERATORS if rest.lower().startswith(o)), None)
-    if op is None:
-        raise ValueError(f"In '{text}': use one of > >= < <= == != contains, or 'is blank' / 'is not blank'.")
-    value_text = rest[len(op):]
-    series = df[col]
-
-    if op.startswith("is not"):
-        return series.notna(), f"{col} is not blank"
-    if op.startswith("is "):
-        return series.isna(), f"{col} is blank"
-    if "contains" in op:
-        hit = series.astype(str).str.contains(_parse_value(value_text, pd.Series(dtype=str)), case=False, regex=False) & series.notna()
-        return (~hit if op.startswith("not") else hit), f"{col} {op} {value_text.strip()}"
-
-    value = _parse_value(value_text, series)
-    comparisons = {">=": series.ge, "<=": series.le, ">": series.gt, "<": series.lt,
-                   "==": series.eq, "=": series.eq, "!=": series.ne}
-    if op in (">", ">=", "<", "<=") and not pd.api.types.is_numeric_dtype(series):
-        raise ValueError(f"'{col}' holds text, so it can't be compared with {op}. Use == or contains.")
-    return comparisons[op](value).fillna(False), f"{col} {op} {value_text.strip()}"
-
-
-def parse_filter(df: pd.DataFrame, text: str) -> Tuple[pd.Series, str]:
-    """Conditions joined with `and` / `or` (and binds tighter, as in Python)."""
-    if not text or not text.strip():
-        raise ValueError("Write at least one condition, like: price > 100")
-    keep = pd.Series(False, index=df.index)
-    described = []
-    for alternative in re.split(r"\s+or\s+", text.strip(), flags=re.IGNORECASE):
-        part = pd.Series(True, index=df.index)
-        names = []
-        for piece in re.split(r"\s+and\s+", alternative, flags=re.IGNORECASE):
-            mask, name = _condition(df, piece)
-            part &= mask
-            names.append(name)
-        keep |= part
-        described.append(" and ".join(names))
-    return keep, " or ".join(described)
+CONDITIONS = {"type": "string",
+              "description": 'e.g. price > 100 and location == "Whitefield". Operators: > >= < <= == != '
+                             "contains, is blank, is not blank; join with and / or."}
 
 
 @register_tool(
     "filter_rows",
     "Show only the training rows that match conditions, like df.query (look-only: nothing is removed).",
-    {"conditions": {"type": "string",
-                    "description": 'e.g. price > 100 and location == "Whitefield". Operators: > >= < <= == != '
-                                   "contains, is blank, is not blank; join with and / or."}},
+    {"conditions": CONDITIONS},
     ["conditions"],
 )
 def filter_rows(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,5 +132,5 @@ def pivot_table(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         "success": True,
         "message": f"Pivot table of {what}: '{rows}' down the side, '{cols}' across the top."
                    + (" Showing the most common values only." if trimmed else ""),
-        "evidence": {"preview": _table(_rounded(table))},
+        "evidence": {"preview": _table(table.round(4))},
     }
