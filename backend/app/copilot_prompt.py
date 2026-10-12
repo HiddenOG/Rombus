@@ -43,16 +43,22 @@ INSTRUCTIONS:
    recipe then replays on the new split. You can't do that yourself (it's never offered to you, to
    discourage hunting for a lucky split), so explain how they can, and mention that every re-lock is
    counted. Any recipe step can also be edited, moved, deleted or undone, and the notebook restarted.
+8. Be exact about what tools do. If none does what the user asks, say so plainly and offer the closest
+   real option for what it is; never claim a tool shows something it doesn't. Only call functions
+   that exist. Don't describe results you haven't seen: a suggestion hasn't run until the user clicks it.
+9. Removing a COLUMN (remove_columns) is not dropping ROWS with blanks (drop_missing_rows). "Drop the
+   nulls in size" means the rows where size is blank.
 """.strip()
 
 
 # What the AI is offered in each phase. Every tool description costs reading time (on a laptop
 # CPU, ~45 s per 1,000 tokens), so the AI only sees the tools that fit where the notebook is.
 # People can still run any step themselves with "Add step".
-LOOK = ["preview_data", "get_data_info", "check_duplicates", "plot_histogram", "plot_boxplot",
-        "plot_correlation", "plot_scatterplot"]
-CLEAN = ["remove_columns", "remove_duplicates", "clean_numeric_string", "standardize_text", "impute_missing",
-         "impute_all_missing", "encode_categorical", "encode_all_categorical", "scale_all_features", "log_transform"]
+LOOK = ["preview_data", "get_data_info", "check_duplicates", "show_unique_values", "plot_missing",
+        "plot_histogram", "plot_boxplot", "plot_correlation", "plot_scatterplot"]
+CLEAN = ["remove_columns", "remove_duplicates", "drop_missing_rows", "clean_numeric_string", "standardize_text",
+         "impute_missing", "impute_all_missing", "encode_categorical", "encode_all_categorical", "scale_all_features",
+         "log_transform"]
 MODEL = ["train_models", "auto_ml", "final_exam", "predict", "explain_model", "save_model"]
 
 PHASE_TOOLS = {
@@ -118,6 +124,7 @@ TRAINED MODELS: {', '.join(state['trained_models']) or 'None'}
 RECIPE ({len(state['recipe'])} steps, all editable): {', '.join(s['tool'] for s in state['recipe']) or 'none yet'}
 TEST ROWS LOCKED {state['lock_count']} TIME(S)
 COMPLETED STEPS: {', '.join(state['completed_steps'][-10:]) or 'None'}
+YOUR LAST REPLY OFFERED RUN BUTTONS FOR: {', '.join(last_suggestions(session)) or 'nothing'} (they only run when the user clicks them)
 
 ALL COLUMNS:
 {session.get_compact_column_summary()}
@@ -130,10 +137,20 @@ def recent_history(session: DataSession, user_message: str) -> List[Dict[str, st
     # The chat router appends the current message to memory before calling us
     if history and history[-1] == {"role": "user", "content": user_message}:
         history = history[:-1]
+    # Old saved notebooks may hold copied text patterns: clean them so they aren't imitated
     return [
-        {"role": "user" if m["role"] == "user" else "assistant", "content": m["content"]}
+        {"role": "user" if m["role"] == "user" else "assistant",
+         "content": m["content"] if m["role"] == "user" else strip_copied_text(m["content"])}
         for m in history[-HISTORY_MESSAGES:]
     ]
+
+
+def last_suggestions(session: DataSession) -> List[str]:
+    """What the copilot's latest reply suggested (as Run buttons)."""
+    for m in reversed(session.memory):
+        if m.get("role") == "assistant" and "suggested" in m:
+            return m["suggested"]
+    return []
 
 
 # A reply that announces an action ("Let me run it now:", "I'll drop them") but makes no function
@@ -151,14 +168,34 @@ def promises_action(text: str) -> bool:
     return bool(text) and (text.endswith(":") or bool(_PROMISE.search(text)))
 
 
-def memory_entry(reply: Dict[str, Any]) -> str:
-    """What the copilot's reply looks like in later history: its words AND what it suggested.
-    Without the suggestions, the model only ever sees itself talking, never suggesting, and copies that."""
+def memory_entry(reply: Dict[str, Any]) -> Dict[str, Any]:
+    """How the copilot's reply is remembered: its words, plus what it suggested AS DATA.
+
+    The suggestions are kept out of the text on purpose. Written into the text (an earlier version
+    did "[Suggested as Run buttons: x]"), models copied the text pattern instead of making calls.
+    They reach the model through the session briefing instead (see state_snapshot)."""
     actions = reply.get("suggested_actions") or []
-    if not actions:
-        return reply["response"]
-    names = ", ".join(a["tool"] if isinstance(a, dict) else a.tool for a in actions)
-    return f"{reply['response']}\n[Suggested as Run buttons: {names}]"
+    return {"role": "assistant", "content": reply["response"],
+            "suggested": [a["tool"] if isinstance(a, dict) else a.tool for a in actions]}
+
+
+# Text a model may have copied from older history: a written-out suggestion list, or our own note
+_MARKER = re.compile(r"\s*\[Suggested as Run buttons:\s*([^\]]*)\]")
+_NOTICE = re.compile(r"\s*_?\(No step came with this answer\.[^)]*\)_?")
+# Never offered from written-out text: they need a deliberate, AI-proposed call with the right settings
+_NOT_FROM_TEXT = {"final_exam", "select_target", "predict"}
+
+
+def written_suggestions(text: str) -> List[str]:
+    """Tool names a model wrote out as text instead of calling (that can safely become buttons)."""
+    names = [n.strip() for m in _MARKER.finditer(text or "") for n in m.group(1).split(",")]
+    return [n for n in dict.fromkeys(names)
+            if n in TOOL_SPECS and n not in HIDDEN_FROM_AI and n not in _NOT_FROM_TEXT
+            and not TOOL_SPECS[n]["parameters"]["required"]]
+
+
+def strip_copied_text(text: str) -> str:
+    return _NOTICE.sub("", _MARKER.sub("", text or "")).strip()
 
 
 def to_action(name: str, args: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -182,8 +219,12 @@ def failure(message: str, reason: str) -> Dict[str, Any]:
 
 
 def finish(texts: List[str], actions: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Assemble the reply, with a fallback sentence when the model only made function calls."""
-    text = "".join(texts).strip()
+    """Assemble the reply, with a fallback sentence when the model only made function calls.
+    Suggestions written out as text become real ones, and that text is removed."""
+    raw = "".join(texts)
+    if not actions:
+        actions = [{"tool": n, "arguments": {}, "explanation": ""} for n in written_suggestions(raw)]
+    text = strip_copied_text(raw)
     if not text:
         text = "Here's what I suggest next:" if actions else "I've analyzed the situation."
     return {"response": text, "suggested_actions": actions[:MAX_SUGGESTIONS]}

@@ -112,6 +112,23 @@ result = pd.Series({{"min": values.min(), "q1": q1, "median": median, "q3": q3, 
 ''')
 
 
+@builder("show_unique_values")
+def _unique(session, args):
+    col = args.get("column")
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + _code(f'''
+print(train[{col!r}].unique().tolist())                 # the distinct values, as a list
+result = train[{col!r}].value_counts(dropna=False)       # how many rows have each (blanks too)
+''')
+
+
+@builder("plot_missing")
+def _missing(session, args):
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + _code('''
+result = train.isna().mean().sort_values(ascending=False).round(3)  # share of blanks per column
+# import seaborn as sns; sns.heatmap(train.isna(), cbar=False)       # the row-by-column picture
+''')
+
+
 @builder("plot_correlation")
 def _correlation(session, args):
     return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + _code('''
@@ -295,7 +312,7 @@ def action_code(session: DataSession, tool: str, args: Dict[str, Any]) -> str:
 
 
 VIEW_TOOLS = {"preview_data", "get_data_info", "check_duplicates", "plot_histogram", "plot_boxplot",
-              "plot_correlation", "plot_scatterplot"}
+              "plot_correlation", "plot_scatterplot", "show_unique_values", "plot_missing"}
 
 # The referee: their code is shown but can't be edited, or their guarantees would mean nothing
 PROTECTED = {

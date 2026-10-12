@@ -28,13 +28,16 @@ async def chat_with_copilot(request: ChatRequest, visitor: str = Depends(current
     # Save the assistant's reply to memory, but not error notices: the next AI would read them
     # as if it had said them
     if not failed:
-        session.memory.append({"role": "assistant", "content": memory_entry(parsed)})
+        session.memory.append(memory_entry(parsed))
 
     # Persist session (a network call with cloud storage: off the main worker)
     await run_exclusive(session.session_id, session_manager.save, session)
 
+    # A notice (e.g. "no step came with this answer") is shown, but not remembered: kept out of the
+    # history, so the model never sees it as something it said and copies it
+    shown = parsed["response"] + (f"\n\n{parsed['notice']}" if parsed.get("notice") else "")
     return ChatResponse(
-        response=parsed["response"],
+        response=shown,
         suggested_actions=parsed.get("suggested_actions", []),
         current_stage=session.current_stage,
         provider=parsed.get("provider"),

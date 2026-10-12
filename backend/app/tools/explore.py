@@ -133,6 +133,58 @@ def plot_correlation(session: DataSession, args: Dict[str, Any]) -> Dict[str, An
 
 
 @register_tool(
+    "show_unique_values",
+    "List a column's distinct values with how many rows have each (like value_counts / unique()).",
+    {"column": COLUMN},
+    ["column"],
+)
+def show_unique_values(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
+    col = args.get("column")
+    validate_column(session, col)
+    series = session.df[col]
+    counts = series.value_counts(dropna=False)
+    shown = counts.head(100)
+    table = [{"value": None if pd.isna(v) else (v.item() if hasattr(v, "item") else v),
+              "rows": int(n), "share": f"{n / len(series):.1%}"} for v, n in shown.items()]
+    values = [repr(None if pd.isna(v) else (v.item() if hasattr(v, "item") else v)) for v in counts.index[:30]]
+    listed = "[" + ", ".join(values) + (", …" if len(counts) > 30 else "") + "]"
+    more = f" Showing the 100 most common of {len(counts)}." if len(counts) > 100 else ""
+    return {
+        "success": True,
+        "message": f"'{col}' has {series.nunique()} distinct values ({int(series.isna().sum())} blank): {listed}.{more}",
+        "evidence": {"preview": table},
+    }
+
+
+@register_tool("plot_missing", "Map of where the blanks (missing values) are: share per column, and a row-by-column picture.")
+def plot_missing(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
+    df = session.df
+    missing = df.isna()
+    share = missing.mean()
+    # Columns with blanks first (most blanks first), then the rest; at most 40 so the picture stays readable
+    order = share.sort_values(ascending=False, kind="stable").index.tolist()[:40]
+    # Up to 120 rows, evenly spaced, in their original order (like seaborn's heatmap of df.isnull())
+    rows = np.unique(np.linspace(0, len(df) - 1, min(len(df), 120)).astype(int)) if len(df) else []
+    blank_cols = [c for c in order if share[c] > 0]
+    any_blank = int(missing.any(axis=1).sum())
+    return {
+        "success": True,
+        "message": (f"{len(blank_cols)} of {df.shape[1]} columns have blanks; {any_blank} of {len(df)} training rows "
+                    f"({any_blank / max(len(df), 1):.1%}) have at least one."
+                    + (" Worst: " + ", ".join(f"{c} {share[c]:.1%}" for c in blank_cols[:5]) + "." if blank_cols else "")),
+        "evidence": {
+            "chart_type": "missing_map",
+            "title": "Where the blanks are",
+            "columns": [str(c) for c in order],
+            "missing_share": {str(c): round(float(share[c]), 4) for c in order},
+            "rows": [[int(v) for v in missing.iloc[i][order].to_numpy()] for i in rows],
+            "row_numbers": [int(i) for i in rows],
+            "total_rows": len(df),
+        },
+    }
+
+
+@register_tool(
     "plot_scatterplot",
     "Scatter plot of two columns, optionally colored by a third.",
     {"x": COLUMN, "y": COLUMN, "hue": COLUMN},

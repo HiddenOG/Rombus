@@ -36,6 +36,7 @@ VIEW_ARGS = {
     "plot_histogram": {"column": "plan"},
     "plot_boxplot": {"column": "age"},
     "plot_scatterplot": {"x": "visits", "y": "age", "hue": "plan"},
+    "show_unique_values": {"column": "plan"},
 }
 
 

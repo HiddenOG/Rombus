@@ -84,6 +84,17 @@ def apply(df, learned):
 ''')
 
 
+@builder("drop_missing_rows")
+def _drop_missing_rows(args, target):
+    cols = args.get("columns") or []
+    subset = f"subset={cols!r}" if cols else ""
+    return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
+def apply(df, learned):
+    # TRAINING ROWS ONLY: you still have to predict for test rows and new customers with blanks
+    return df.dropna({subset}).reset_index(drop=True)
+''')
+
+
 def _fill_expr(col: str, strategy: str) -> str:
     return {
         "mean": f"train[{col!r}].mean()",

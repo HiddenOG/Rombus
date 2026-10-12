@@ -25,10 +25,27 @@ def test_spots_promises(text, promise):
     assert promises_action(text) is promise
 
 
-def test_history_shows_what_was_suggested():
+def test_history_keeps_suggestions_as_data_not_text():
+    """Written into the text, models copied the pattern instead of making calls (seen live)."""
     reply = {"response": "Remove them.", "suggested_actions": [{"tool": "remove_duplicates", "arguments": {}}]}
-    assert memory_entry(reply) == "Remove them.\n[Suggested as Run buttons: remove_duplicates]"
-    assert memory_entry({"response": "Done.", "suggested_actions": []}) == "Done."
+    assert memory_entry(reply) == {"role": "assistant", "content": "Remove them.", "suggested": ["remove_duplicates"]}
+
+
+def test_written_out_suggestions_become_real_ones():
+    """Seen live: "Let's drop the duplicate rows. [Suggested as Run buttons: remove_duplicates]" and no call."""
+    from app.copilot_prompt import finish
+    reply = finish(["Let's drop them. [Suggested as Run buttons: remove_duplicates, final_exam, impute_missing]\n\n"
+                    "_(No step came with this answer. You can add it yourself with **Add step**, or ask again.)_"], [])
+    assert reply["response"] == "Let's drop them."
+    # final_exam is never offered from text; impute_missing needs settings it doesn't have
+    assert [a["tool"] for a in reply["suggested_actions"]] == ["remove_duplicates"]
+
+
+def test_old_copied_text_is_cleaned_from_history():
+    from app.copilot_prompt import recent_history
+    s = DataSession(pd.DataFrame({"x": [1, 2]}), "d.csv")
+    s.memory = [{"role": "assistant", "content": "Undo first: [Suggested as Run buttons: undo]"}]
+    assert recent_history(s, "next")[0]["content"] == "Undo first:"
 
 
 @pytest.fixture
@@ -69,7 +86,9 @@ def test_a_broken_promise_is_retried_with_a_required_call(session, monkeypatch):
 
 def test_says_so_when_the_retry_also_brings_nothing(session, monkeypatch):
     fake_server(monkeypatch, [reply("Let me run it now:"), reply("")])
-    assert "Add step" in run(session)["response"]
+    result = run(session)
+    # Shown to the person, but kept apart from the words that go into the history
+    assert "Add step" in result["notice"] and "Add step" not in result["response"]
 
 
 def test_plain_answers_are_not_retried(session, monkeypatch):

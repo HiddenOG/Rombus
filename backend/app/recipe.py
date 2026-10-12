@@ -226,6 +226,36 @@ class RemoveDuplicates(Step):
         return f"Removed {len(before) - len(after)} duplicate rows. Row count: {len(before)} → {len(after)}."
 
 
+@step_type("drop_missing_rows")
+class DropMissingRows(Step):
+    """Drop training rows that have blanks (in the chosen columns, or in any column).
+
+    Training rows only: you can't refuse to predict for a customer because a field is blank, so
+    test rows and new customers keep their rows and still need a fill rule for those blanks.
+    """
+    kind = "train_only"
+
+    def _columns(self, df) -> List[str]:
+        return [c for c in self.args.get("columns") or [] if c in df.columns]
+
+    def learn(self, train):
+        for c in self.args.get("columns") or []:
+            self._require_column(train, c, "columns")
+        return {}
+
+    def apply(self, df, learned):
+        return df.dropna(subset=self._columns(df) or None).reset_index(drop=True)
+
+    def summary(self, before, after, learned):
+        where = f"in {', '.join(self._columns(before))}" if self._columns(before) else "in any column"
+        dropped = len(before) - len(after)
+        msg = f"Dropped {dropped} training rows with blanks {where}. Row count: {len(before)} → {len(after)}."
+        if dropped / max(len(before), 1) > 0.2:
+            msg += f" That's {dropped / len(before):.0%} of the training rows: filling the blanks might keep more to learn from."
+        return (msg + " Test rows and new customers aren't dropped (you still have to predict for them), "
+                      "so their blanks need a fill step, or they'll be filled with 0 when predicting.")
+
+
 # ── Learning steps ──────────────────────────────────────────────────────────────
 
 def _fill_value(series: pd.Series, strategy: str) -> Any:

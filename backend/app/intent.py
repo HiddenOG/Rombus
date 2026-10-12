@@ -31,6 +31,14 @@ COMMANDS = [
     (re.compile(r"\b(auto ?ml|tune|tuning|hyper ?param)"), "auto_ml"),
 ]
 
+# Talk of blanks (typos included: "nul vales"), of dropping or filling them, and of looking at them
+_MISSING = re.compile(r"\b(nul\w*|nans?|missing|blanks?|empty|n/?a)\b")
+_DROP = re.compile(r"\b(drop\w*|remov\w*|delet\w*|eliminat\w*|get rid)")
+_FILL = re.compile(r"\b(fill\w*|imput\w*|replac\w*)\b")
+_SHOW_MISSING = re.compile(r"\b(where|visuali[sz]\w*|map|heat ?map|plot|show|see|chart)\b.*\b(nul\w*|nans?|missing|blanks?)\b"
+                           r"|\b(nul\w*|missing|blanks?)\b.*\b(map|heat ?map|plot|chart|pattern)\b")
+_UNIQUE = re.compile(r"\b(unique|distinct|value ?counts?|categories|array list|all the values)\b")
+
 # Short replies that mean "yes, do that"
 FOLLOW_UP = re.compile(
     r"^\s*(yes|yeah|yep|yup|ok|okay|sure|please|do it|do that|go|go ahead|proceed|run it|"
@@ -41,10 +49,10 @@ FOLLOW_UP = re.compile(
 NEXT_AFTER_VIEW = {"check_duplicates": "remove_duplicates"}
 
 # Steps the safety net may offer without settings from the user
-NO_SETTINGS = {"remove_duplicates", "impute_all_missing", "encode_all_categorical", "scale_all_features",
-               "train_models", "auto_ml"}
+NO_SETTINGS = {"remove_duplicates", "drop_missing_rows", "impute_all_missing", "encode_all_categorical",
+               "scale_all_features", "train_models", "auto_ml", "plot_missing", "check_duplicates"}
 
-_SUGGESTED = re.compile(r"\[Suggested as Run buttons: ([a-z_, ]+)\]")
+_SUGGESTED = re.compile(r"\[Suggested as Run buttons: ([a-z_, ]+)\]")  # how an older version wrote them
 _EXECUTED = re.compile(r"^Action Executed: (\w+)\.")
 
 
@@ -53,9 +61,27 @@ def obvious_step(session: DataSession, message: str) -> Optional[Dict[str, Any]]
     allowed = set(available_tools(session))
     text = message.lower()
 
+    # "drop the nulls in size": rows with blanks, NOT the size column (an earlier version got this wrong)
+    if _DROP.search(text) and _MISSING.search(text) and not _FILL.search(text):
+        if "drop_missing_rows" not in allowed:
+            return None
+        cols = _named_columns(session, text)
+        where = f" in {', '.join(cols)}" if cols else ""
+        return {"tool": "drop_missing_rows", "arguments": {"columns": cols} if cols else {},
+                "explanation": f"You asked to drop the rows with blanks{where} (training rows only)."}
+
     tool = _column_removal(session, text)
     if tool:
         return tool if "remove_columns" in allowed else None
+
+    # Looking, not changing: "where are the nulls", "unique values of size"
+    if _SHOW_MISSING.search(text) and "plot_missing" in allowed:
+        return {"tool": "plot_missing", "arguments": {}, "explanation": "A map of where the blanks are."}
+    if _UNIQUE.search(text) and "show_unique_values" in allowed:
+        cols = _named_columns(session, text) or ([session.target_column] if "target" in text else [])
+        if cols:
+            return {"tool": "show_unique_values", "arguments": {"column": cols[0]},
+                    "explanation": f"The distinct values of {cols[0]}, with how many rows have each."}
 
     for pattern, name in COMMANDS:
         if pattern.search(text):
@@ -76,12 +102,17 @@ def _offer(session: DataSession, name: str, allowed: set, why: str) -> Optional[
     return {"tool": name, "arguments": {}, "explanation": why}
 
 
+def _named_columns(session: DataSession, text: str) -> List[str]:
+    return [c for c in session.df.columns
+            if c != session.target_column and re.search(rf"(?<![\w]){re.escape(str(c).lower())}(?![\w])", text)]
+
+
 def _column_removal(session: DataSession, text: str) -> Optional[Dict[str, Any]]:
-    """'drop the society column', 'remove balcony and bath' -> remove_columns with those columns."""
-    if not re.search(rf"\b{_ACT}", text) or re.search(r"\bdup\w*|\brows?\b", text):
+    """'drop the society column', 'remove balcony and bath' -> remove_columns with those columns.
+    Not when the message is about rows, duplicates or blanks: those mean rows, not columns."""
+    if not re.search(rf"\b{_ACT}", text) or re.search(r"\bdup\w*|\brows?\b", text) or _MISSING.search(text):
         return None
-    named = [c for c in session.df.columns
-             if c != session.target_column and re.search(rf"(?<![\w]){re.escape(str(c).lower())}(?![\w])", text)]
+    named = _named_columns(session, text)
     if not named:
         return None
     return {"tool": "remove_columns", "arguments": {"columns": named},
@@ -91,18 +122,16 @@ def _column_removal(session: DataSession, text: str) -> Optional[Dict[str, Any]]
 def _previous_step(session: DataSession) -> Optional[str]:
     """What 'yes / do it' refers to: the AI's latest suggestion, or the natural next step after the
     latest view. Looks back past a few word-only replies (the AI talking without suggesting)."""
-    for entry in list(reversed(_earlier_assistant_entries(session)))[:4]:
-        suggested = _SUGGESTED.search(entry)
+    for entry in list(reversed([m for m in session.memory if m.get("role") == "assistant"]))[:4]:
+        if entry.get("suggested"):
+            return entry["suggested"][0]
+        suggested = _SUGGESTED.search(entry["content"])  # notebooks saved by an older version
         if suggested:
             return suggested.group(1).split(",")[0].strip()
-        executed = _EXECUTED.match(entry)
+        executed = _EXECUTED.match(entry["content"])
         if executed:
             return NEXT_AFTER_VIEW.get(executed.group(1))  # an action ran since: only its natural next step
     return None
-
-
-def _earlier_assistant_entries(session: DataSession) -> List[str]:
-    return [m["content"] for m in session.memory if m.get("role") == "assistant"]
 
 
 def _title(name: str) -> str:

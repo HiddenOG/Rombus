@@ -72,8 +72,7 @@ async def get_openai_compatible_response(session: DataSession, user_message: str
         reply["suggested_actions"] = retry["suggested_actions"]
         reply["usage"] = {k: (reply["usage"].get(k) or 0) + (retry["usage"].get(k) or 0) for k in reply["usage"]}
     else:
-        reply["response"] += ("\n\n_(No step came with this answer. You can add it yourself with **Add step**, "
-                              "or ask again.)_")
+        reply["notice"] = "_(No step came with this answer. You can add it yourself with **Add step**, or ask again.)_"
     return reply
 
 

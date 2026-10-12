@@ -31,6 +31,13 @@ recipe_tool("remove_columns", "Drop one or more columns.", {"columns": COLUMNS},
 recipe_tool("remove_duplicates", "Remove duplicate rows from the training rows.")
 
 recipe_tool(
+    "drop_missing_rows",
+    "Drop training rows with blanks in the given columns (or in any column if none given). "
+    "Good when few rows are affected; otherwise prefer filling (impute).",
+    {"columns": {**COLUMNS, "description": "Only rows blank in these columns (optional)."}},
+)
+
+recipe_tool(
     "clean_numeric_string",
     "Strip $, commas and other non-numeric characters from a column and convert it to numeric.",
     {"column": COLUMN},

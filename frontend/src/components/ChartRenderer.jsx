@@ -23,6 +23,8 @@ export function ChartRenderer({ evidence }) {
             return <CorrelationCard data={evidence.correlation} columns={evidence.columns} title={evidence.title} />;
         case 'scatter':
             return <ScatterCard data={evidence.chart_data} x={evidence.x} y={evidence.y} hue={evidence.hue} title={evidence.title} />;
+        case 'missing_map':
+            return <MissingMapCard evidence={evidence} />;
         default:
             return null;
     }
@@ -189,6 +191,58 @@ function CorrelationCard({ data, columns, title }) {
                         ))}
                     </tbody>
                 </table>
+            </div>
+        </ChartCard>
+    );
+}
+
+/**
+ * Where the blanks are, like seaborn's heatmap(df.isnull()): one column per data column, one thin
+ * strip per row (a sample, in order). Two states only: blank (brand color) or filled (neutral).
+ * Each column's blank share is written under its name, so nobody has to count cells.
+ */
+function MissingMapCard({ evidence }) {
+    const { columns = [], missing_share: share = {}, rows = [], row_numbers: rowNumbers = [], total_rows: total, title } = evidence;
+    if (!columns.length) return null;
+    const grid = { gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` };
+
+    const legend = (
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-3">
+            <span className="flex items-center gap-1.5"><span className="h-2.5 w-4 rounded-sm" style={{ background: SERIES }} /> blank</span>
+            <span className="flex items-center gap-1.5"><span className="h-2.5 w-4 rounded-sm bg-surface-2" /> filled</span>
+            <span>{rows.length < total ? `${rows.length} of ${total.toLocaleString()} training rows, evenly spaced` : `all ${total} training rows`}</span>
+        </div>
+    );
+
+    return (
+        <ChartCard title={title} footer={legend}>
+            <div className="overflow-x-auto">
+                <div style={{ minWidth: `${Math.max(columns.length * 28, 240)}px` }}>
+                    <div className="grid gap-px" style={grid}>
+                        {columns.map(c => (
+                            <div key={c} className="flex min-w-0 flex-col items-center gap-0.5 pb-1.5" title={`${c}: ${(share[c] * 100).toFixed(1)}% blank`}>
+                                <span className="w-full truncate text-center text-[10px] font-medium text-ink-2">{c}</span>
+                                <span className={`text-[10px] tabular-nums ${share[c] > 0 ? 'font-semibold text-ink' : 'text-ink-3'}`}>
+                                    {share[c] > 0 ? `${(share[c] * 100).toFixed(share[c] < 0.01 ? 1 : 0)}%` : '0'}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="overflow-hidden rounded-md border border-line">
+                        {rows.map((cells, i) => (
+                            <div key={rowNumbers[i] ?? i} className="grid gap-px" style={grid}>
+                                {cells.map((blank, j) => (
+                                    <div
+                                        key={j}
+                                        className={blank ? '' : 'bg-surface-2'}
+                                        style={{ height: 3, ...(blank ? { background: SERIES } : {}) }}
+                                        title={blank ? `Row ${rowNumbers[i]}: ${columns[j]} is blank` : undefined}
+                                    />
+                                ))}
+                            </div>
+                        ))}
+                    </div>
+                </div>
             </div>
         </ChartCard>
     );

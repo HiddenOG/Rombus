@@ -44,6 +44,18 @@ def test_clear_commands(session, message, tool):
     assert step(session, message) == (tool, {})
 
 
+@pytest.mark.parametrize("message, expected", [
+    # Seen live: this offered "Remove columns: size" and deleted the whole column
+    ("alrigght drop the nul vales in balcony column", ("drop_missing_rows", {"columns": ["balcony"]})),
+    ("drop nulls in society", ("drop_missing_rows", {"columns": ["society"]})),
+    ("remove rows with missing values", ("drop_missing_rows", {})),
+    ("using seaborn heat map visualize where the null values are", ("plot_missing", {})),
+    ("show me the unique values of society", ("show_unique_values", {"column": "society"})),
+])
+def test_rows_with_blanks_and_looking_at_them(session, message, expected):
+    assert step(session, message) == expected
+
+
 def test_naming_columns_to_remove(session):
     assert step(session, "drop the society and balcony columns") == ("remove_columns", {"columns": ["society", "balcony"]})
     assert step(session, "remove price") is None  # the target is never removed this way
