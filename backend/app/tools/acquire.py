@@ -78,22 +78,31 @@ def select_target(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     return {"success": True, "message": msg}
 
 
+MAX_PREVIEW_ROWS = 200
+
+
 @register_tool(
     "preview_data",
-    f"Preview the first N rows of the dataset (at most {PREVIEW_ROWS_BEFORE_SPLIT} before the target is chosen).",
-    {"rows": {"type": "integer", "description": "Number of rows (default 5)."}},
+    f"Preview N rows of the dataset: the first (head), the last (tail) or a random sample "
+    f"(at most {PREVIEW_ROWS_BEFORE_SPLIT} before the target is chosen).",
+    {"rows": {"type": "integer", "description": "Number of rows (default 5)."},
+     "position": {"type": "string", "enum": ["first", "last", "random"]}},
     before_split=True,
 )
 def preview_data(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Preview first N rows of the dataset."""
-    rows = int(args.get("rows", 5))
+    """Preview rows: head, tail or a random sample."""
+    rows = max(1, min(int(args.get("rows", 5)), MAX_PREVIEW_ROWS))
     if not session.is_split:
         rows = min(rows, PREVIEW_ROWS_BEFORE_SPLIT)
-    preview = session.df.head(rows).to_dict(orient='records')
+    position = args.get("position") or "first"
+    if position not in ("first", "last", "random"):
+        raise ValueError("Position must be first, last or random.")
+    df = session.df
+    shown = {"first": df.head, "last": df.tail}.get(position, lambda n: df.sample(min(n, len(df)), random_state=0))(rows)
     return {
         "success": True,
-        "message": f"Showing first {rows} rows.",
-        "evidence": {"preview": preview},
+        "message": f"Showing {'a random' if position == 'random' else 'the ' + position} {len(shown)} rows.",
+        "evidence": {"preview": shown.to_dict(orient='records')},
     }
 
 

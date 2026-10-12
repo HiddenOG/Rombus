@@ -9,6 +9,7 @@ from textwrap import dedent
 from typing import Any, Callable, Dict
 
 import numpy as np
+import pandas as pd
 
 from app.config import settings
 from app.session import DataSession
@@ -69,7 +70,73 @@ VIEW_NOTE = "# `result` is what gets shown. Uncomment a .plot line to draw a cha
 @builder("preview_data")
 def _preview(session, args):
     rows = int(args.get("rows") or 5)
-    return HEADER + TRAIN_NOTE + VIEW_NOTE + f"\nresult = train.head({rows})"
+    call = {"last": f"train.tail({rows})", "random": f"train.sample({rows}, random_state=0)"}.get(
+        args.get("position"), f"train.head({rows})")
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + f"\nresult = {call}"
+
+
+@builder("filter_rows")
+def _filter(session, args):
+    try:
+        expression = _pandas_mask(session, args.get("conditions", ""))
+    except ValueError as e:
+        return HEADER + f"# Couldn't read the conditions: {e}"
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + _code(f'''
+# {args.get("conditions", "").strip()}   (& means and, | means or)
+mask = {expression}
+print(f"{{mask.sum()}} of {{len(train)}} rows match")
+result = train[mask]
+''')
+
+
+def _pandas_mask(session, text: str) -> str:
+    """The filter as plain pandas, built from the same parser the app uses."""
+    from app.tools.analysis import _condition
+    import re
+    alternatives = []
+    for alternative in re.split(r"\s+or\s+", text.strip(), flags=re.IGNORECASE):
+        parts = []
+        for piece in re.split(r"\s+and\s+", alternative, flags=re.IGNORECASE):
+            _, described = _condition(session.df, piece)  # validates, and normalises the wording
+            parts.append(_mask_code(session.df, piece, described))
+        alternatives.append(" & ".join(parts))
+    return " | ".join(f"({a})" if len(alternatives) > 1 else a for a in alternatives)
+
+
+def _mask_code(df, piece: str, described: str) -> str:
+    from app.tools.analysis import _OPERATORS, _parse_value
+    col = next(c for c in sorted(df.columns, key=lambda c: -len(str(c))) if described.startswith(str(c)))
+    rest = described[len(str(col)):].strip()
+    ref = f"train[{col!r}]"
+    if rest == "is blank":
+        return f"{ref}.isna()"
+    if rest == "is not blank":
+        return f"{ref}.notna()"
+    op = next(o for o in _OPERATORS if rest.startswith(o))
+    value = _parse_value(rest[len(op):], df[col] if "contains" not in op else pd.Series(dtype=str))
+    if "contains" in op:
+        code = f"{ref}.astype(str).str.contains({value!r}, case=False, regex=False)"
+        return f"~{code}" if op.startswith("not") else f"({code})"
+    py_op = "==" if op == "=" else op
+    return f"({ref} {py_op} {value!r})"
+
+
+@builder("group_summary")
+def _group(session, args):
+    by, value = args.get("group_by"), args.get("value")
+    agg = args.get("aggregation") or ("mean" if value else "count")
+    line = (f"result = train.groupby({by!r}, dropna=False)[{value!r}].agg({agg!r}).sort_values(ascending=False)"
+            if value else f"result = train.groupby({by!r}, dropna=False).size().sort_values(ascending=False)")
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + line + "\n# result.head(20).plot.bar()"
+
+
+@builder("pivot_table")
+def _pivot(session, args):
+    rows, cols, value = args.get("rows"), args.get("columns"), args.get("value")
+    agg = args.get("aggregation") or ("mean" if value else "count")
+    line = (f"result = train.pivot_table(index={rows!r}, columns={cols!r}, values={value!r}, aggfunc={agg!r})"
+            if value else f"result = pd.crosstab(train[{rows!r}], train[{cols!r}])  # row counts")
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + line
 
 
 @builder("get_data_info")
@@ -312,7 +379,8 @@ def action_code(session: DataSession, tool: str, args: Dict[str, Any]) -> str:
 
 
 VIEW_TOOLS = {"preview_data", "get_data_info", "check_duplicates", "plot_histogram", "plot_boxplot",
-              "plot_correlation", "plot_scatterplot", "show_unique_values", "plot_missing"}
+              "plot_correlation", "plot_scatterplot", "show_unique_values", "plot_missing",
+              "filter_rows", "group_summary", "pivot_table"}
 
 # The referee: their code is shown but can't be edited, or their guarantees would mean nothing
 PROTECTED = {

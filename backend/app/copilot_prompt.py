@@ -55,6 +55,7 @@ INSTRUCTIONS:
 # CPU, ~45 s per 1,000 tokens), so the AI only sees the tools that fit where the notebook is.
 # People can still run any step themselves with "Add step".
 LOOK = ["preview_data", "get_data_info", "check_duplicates", "show_unique_values", "plot_missing",
+        "filter_rows", "group_summary", "pivot_table",
         "plot_histogram", "plot_boxplot", "plot_correlation", "plot_scatterplot"]
 CLEAN = ["remove_columns", "remove_duplicates", "drop_missing_rows", "clean_numeric_string", "standardize_text",
          "impute_missing", "impute_all_missing", "encode_categorical", "encode_all_categorical", "scale_all_features",

@@ -114,4 +114,4 @@ COLUMNS = {"type": "array", "items": {"type": "string"}, "description": "Exact c
 
 
 # Import all tool modules to trigger registration
-from app.tools import acquire, scrub, explore, model, workflow, custom  # noqa: E402,F401
+from app.tools import acquire, scrub, explore, analysis, model, workflow, custom  # noqa: E402,F401

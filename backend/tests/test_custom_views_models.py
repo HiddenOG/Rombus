@@ -37,6 +37,10 @@ VIEW_ARGS = {
     "plot_boxplot": {"column": "age"},
     "plot_scatterplot": {"x": "visits", "y": "age", "hue": "plan"},
     "show_unique_values": {"column": "plan"},
+    "filter_rows": {"conditions": 'age > 30 and plan == "pro" or visits is blank'},
+    "group_summary": {"group_by": "plan", "value": "age", "aggregation": "median"},
+    "pivot_table": {"rows": "plan", "columns": "churned", "value": "visits", "aggregation": "mean"},
+    "preview_data": {"rows": 3, "position": "last"},
 }
 
 

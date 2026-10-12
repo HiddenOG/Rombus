@@ -16,7 +16,15 @@ export function ChartRenderer({ evidence }) {
     switch (evidence.chart_type) {
         case 'histogram':
         case 'bar':
-            return <BarChartCard data={evidence.chart_data} title={evidence.title} xKey={evidence.x_key} yKey={evidence.y_key} />;
+            return (
+                <BarChartCard
+                    data={evidence.chart_data}
+                    title={evidence.title}
+                    xKey={evidence.x_key}
+                    yKey={evidence.y_key}
+                    categorical={evidence.chart_type === 'bar'}
+                />
+            );
         case 'boxplot':
             return <BoxPlotCard data={evidence.chart_data} title={evidence.title} />;
         case 'heatmap':
@@ -40,7 +48,8 @@ function ChartCard({ title, children, footer }) {
     );
 }
 
-function BarChartCard({ data, title, xKey = 'bin', yKey = 'count' }) {
+// Histogram bars touch (they cover a continuous range); category bars stand apart, at a sensible width
+function BarChartCard({ data, title, xKey = 'bin', yKey = 'count', categorical = false }) {
     if (!data?.length) return null;
 
     // Feature importance uses feature/importance keys
@@ -50,7 +59,7 @@ function BarChartCard({ data, title, xKey = 'bin', yKey = 'count' }) {
     return (
         <ChartCard title={title}>
             <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={data} margin={{ top: 4, right: 8, left: -12, bottom: 4 }} barCategoryGap={2}>
+                <BarChart data={data} margin={{ top: 4, right: 8, left: -12, bottom: 4 }} barCategoryGap={categorical ? '25%' : 2}>
                     <CartesianGrid vertical={false} stroke={GRID} />
                     <XAxis
                         dataKey={actualXKey}
@@ -64,7 +73,7 @@ function BarChartCard({ data, title, xKey = 'bin', yKey = 'count' }) {
                     />
                     <YAxis tick={axisTick} tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={tooltipStyle} cursor={{ fill: 'rgba(235, 104, 52, 0.08)' }} />
-                    <Bar dataKey={actualYKey} fill={SERIES} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey={actualYKey} fill={SERIES} radius={[4, 4, 0, 0]} maxBarSize={categorical ? 56 : undefined} />
                 </BarChart>
             </ResponsiveContainer>
         </ChartCard>
