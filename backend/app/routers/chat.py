@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from app.access import current_owner, limit, load_owned
 from app.copilot import get_copilot_response
+from app.copilot_prompt import memory_entry
 from app.models import ChatRequest, ChatResponse
 from app.session import run_exclusive, session_manager
 
@@ -27,7 +28,7 @@ async def chat_with_copilot(request: ChatRequest, visitor: str = Depends(current
     # Save the assistant's reply to memory, but not error notices: the next AI would read them
     # as if it had said them
     if not failed:
-        session.memory.append({"role": "assistant", "content": parsed["response"]})
+        session.memory.append({"role": "assistant", "content": memory_entry(parsed)})
 
     # Persist session (a network call with cloud storage: off the main worker)
     await run_exclusive(session.session_id, session_manager.save, session)

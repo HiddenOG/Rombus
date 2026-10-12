@@ -14,7 +14,7 @@ from typing import Optional
 import httpx
 
 from app.config import settings
-from app.copilot_prompt import failure
+from app.copilot_prompt import failure, promises_action
 from app.ollama_client import build_messages, build_tools, parse_message
 from app.session import DataSession
 
@@ -61,6 +61,25 @@ async def get_openai_compatible_response(session: DataSession, user_message: str
         "tool_choice": "auto",
         "temperature": 0.2,
     }
+    reply = await _ask(server, payload)
+    if reply.get("failure") or reply["suggested_actions"] or not promises_action(reply["response"]):
+        return reply
+
+    # It announced an action but didn't suggest one ("Let me run it now:" and nothing else).
+    # Ask once more, this time requiring a function call, and keep its original words.
+    retry = await _ask(server, {**payload, "tool_choice": "required"})
+    if not retry.get("failure") and retry["suggested_actions"]:
+        reply["suggested_actions"] = retry["suggested_actions"]
+        reply["usage"] = {k: (reply["usage"].get(k) or 0) + (retry["usage"].get(k) or 0) for k in reply["usage"]}
+    else:
+        reply["response"] += ("\n\n_(No step came with this answer. You can add it yourself with **Add step**, "
+                              "or ask again.)_")
+    return reply
+
+
+async def _ask(server: Server, payload: dict) -> dict:
+    """One request to the server, parsed into reply text and suggested actions (or a failure)."""
+    name = server.label
     headers = {"Authorization": f"Bearer {server.api_key}"} if server.api_key else {}
     url = server.base_url.rstrip("/") + "/chat/completions"
     try:

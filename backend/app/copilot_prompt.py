@@ -7,6 +7,7 @@ The briefing is split in two so local models stay fast:
 
 import copy
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from app.session import DataSession
@@ -28,6 +29,9 @@ INSTRUCTIONS:
 1. Always reply with a short text answer: advice, explanation or confirmation.
 2. You cannot run tools. Calling a function only SUGGESTS that action to the user, who
    decides whether to run it. Suggest at most {MAX_SUGGESTIONS} actions, most useful first.
+   Whenever you recommend an action, CALL its function in the same reply: that call is what puts the
+   Run button in front of the user. Never say you are running, doing or about to run something
+   ("let me run it now"); say what you suggest, and call the function.
 3. Guide the user through the ASEMIC stages in order, using the column evidence in the
    session state (e.g. imputation for columns with missing values, encoding for categorical columns).
 4. Use ONLY exact column names from the session state. Never invent column names.
@@ -130,6 +134,31 @@ def recent_history(session: DataSession, user_message: str) -> List[Dict[str, st
         {"role": "user" if m["role"] == "user" else "assistant", "content": m["content"]}
         for m in history[-HISTORY_MESSAGES:]
     ]
+
+
+# A reply that announces an action ("Let me run it now:", "I'll drop them") but makes no function
+# call leaves the user with a promise and no Run button. Small and mid-size models do this, more so
+# once their own earlier promises are in the history. Spotting it lets a provider ask once more.
+_PROMISE = re.compile(
+    r"\b(let me|let['’]s|i['’]ll|i will|i['’]m going to|i am going to|i['’]m (now )?(running|dropping|removing|"
+    r"filling|encoding|scaling|training)|here['’]s the step|here is the step|"
+    r"(running|dropping|removing|filling|encoding|scaling|training|fixing)\b[^.!?]*\bnow)\b", re.IGNORECASE)
+
+
+def promises_action(text: str) -> bool:
+    """True when the text announces doing something (or ends on a colon, introducing a step)."""
+    text = (text or "").strip()
+    return bool(text) and (text.endswith(":") or bool(_PROMISE.search(text)))
+
+
+def memory_entry(reply: Dict[str, Any]) -> str:
+    """What the copilot's reply looks like in later history: its words AND what it suggested.
+    Without the suggestions, the model only ever sees itself talking, never suggesting, and copies that."""
+    actions = reply.get("suggested_actions") or []
+    if not actions:
+        return reply["response"]
+    names = ", ".join(a["tool"] if isinstance(a, dict) else a.tool for a in actions)
+    return f"{reply['response']}\n[Suggested as Run buttons: {names}]"
 
 
 def to_action(name: str, args: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
