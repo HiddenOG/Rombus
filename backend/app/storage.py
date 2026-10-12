@@ -13,12 +13,14 @@ from __future__ import annotations
 import io
 import logging
 import os
+import time
 from typing import Any, Dict, List, Optional, Protocol
 from urllib.parse import quote, unquote
 
 import httpx
 import pandas as pd
 from sqlalchemy import Column, Float, Integer, MetaData, String, Table, Text, create_engine, delete, inspect, insert, select, text, update
+from sqlalchemy.exc import OperationalError
 
 from app.config import settings
 
@@ -72,10 +74,27 @@ def _encode_password(rest: str) -> str:
 class Database:
     """The notebook records table."""
 
+    # Waits between tries when the database can't be reached at startup (a network blip, or the
+    # database waking up), so one failed lookup doesn't stop the whole server
+    RETRY_SECONDS = (2, 4, 8, 16)
+
     def __init__(self, url: str):
         # pre_ping: a cloud database drops idle connections; check before use instead of failing
         self.engine = create_engine(url, future=True, pool_pre_ping=True)
-        metadata.create_all(self.engine)
+        for attempt, wait in enumerate((*self.RETRY_SECONDS, None), start=1):
+            try:
+                metadata.create_all(self.engine)
+                break
+            except OperationalError as e:
+                if wait is None:
+                    host = self.engine.url.host or "the database"
+                    raise RuntimeError(
+                        f"Couldn't reach {host} after {attempt} tries ({str(e.orig).splitlines()[0]}). "
+                        "Check your internet connection and DATABASE_URL in backend/.env, or remove "
+                        "DATABASE_URL to keep notebooks on this machine instead.") from None
+                logger.warning("Database not reachable (try %d): %s. Retrying in %ds.",
+                               attempt, str(e.orig).splitlines()[0], wait)
+                time.sleep(wait)
         self._add_missing_columns()
         self._close_public_door()
 
