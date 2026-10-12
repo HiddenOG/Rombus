@@ -54,7 +54,7 @@ export function ExportMenu({ nb }) {
     ];
 
     return (
-        <div ref={ref} className="relative">
+        <div ref={ref} className="sm:relative">
             <button
                 onClick={() => setOpen(o => !o)}
                 disabled={disabled}
@@ -68,7 +68,7 @@ export function ExportMenu({ nb }) {
                 <ChevronDown className="h-3 w-3" />
             </button>
             {open && (
-                <div role="menu" className="absolute right-0 top-full z-30 mt-1.5 w-80 max-w-[90vw] rounded-xl border border-line bg-surface p-1.5 shadow-lg animate-in">
+                <div role="menu" className="absolute inset-x-3 top-full z-30 mt-1.5 rounded-xl border border-line bg-surface p-1.5 shadow-lg animate-in sm:inset-x-auto sm:right-0 sm:w-80">
                     {items.map(({ icon: Icon, label, text, hint = 'Choose the target first.', onClick, disabled: off }) => (
                         <button
                             key={label}

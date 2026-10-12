@@ -1,11 +1,22 @@
 import React, { useEffect, useRef } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, RotateCcw } from 'lucide-react';
+import { Overlay } from './Overlay';
+
+// danger: can't be undone (red, warning sign). caution: worth a pause but safe (brand orange).
+// Keeping red for real danger only means people still take it seriously when they see it.
+const TONES = {
+    danger: { icon: AlertTriangle, badge: 'bg-red-50 text-red-600',
+              button: 'bg-red-600 hover:bg-red-700 focus:ring-red-200' },
+    caution: { icon: RotateCcw, badge: 'bg-brand-50 text-brand-600',
+               button: 'bg-brand-500 hover:bg-brand-600 focus:ring-brand-200' },
+};
 
 /**
- * ConfirmDialog — "are you sure?" for actions that can't be undone.
- * Cancel has focus by default (so Enter never deletes by accident); Escape or a click outside cancels.
+ * ConfirmDialog — "are you sure?" before an action.
+ * Cancel has focus by default (so Enter never confirms by accident); Escape or a click outside cancels.
  */
-export function ConfirmDialog({ open, title, children, confirmLabel = 'Delete', onConfirm, onCancel, busy }) {
+export function ConfirmDialog({ open, title, children, confirmLabel = 'Delete', onConfirm, onCancel, busy, tone = 'danger' }) {
+    const { icon: Icon, badge, button } = TONES[tone];
     const cancelRef = useRef(null);
 
     useEffect(() => {
@@ -19,7 +30,7 @@ export function ConfirmDialog({ open, title, children, confirmLabel = 'Delete', 
     if (!open) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-4 backdrop-blur-[2px] animate-in sm:items-center" onClick={onCancel}>
+        <Overlay onClose={onCancel}>
             <div
                 role="alertdialog"
                 aria-modal="true"
@@ -29,8 +40,8 @@ export function ConfirmDialog({ open, title, children, confirmLabel = 'Delete', 
                 className="w-full max-w-md rounded-2xl border border-line bg-surface p-5 shadow-xl"
             >
                 <div className="flex gap-3.5">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-50">
-                        <AlertTriangle className="h-5 w-5 text-red-600" />
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${badge}`}>
+                        <Icon className="h-5 w-5" />
                     </div>
                     <div className="min-w-0">
                         <h2 id="confirm-title" className="text-base font-semibold text-ink">{title}</h2>
@@ -48,12 +59,12 @@ export function ConfirmDialog({ open, title, children, confirmLabel = 'Delete', 
                     <button
                         onClick={onConfirm}
                         disabled={busy}
-                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:opacity-50"
+                        className={`rounded-lg px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-2 disabled:opacity-50 ${button}`}
                     >
                         {confirmLabel}
                     </button>
                 </div>
             </div>
-        </div>
+        </Overlay>
     );
 }

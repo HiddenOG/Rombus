@@ -28,8 +28,9 @@ export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
 
     return (
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-line bg-surface/70 px-3 backdrop-blur sm:h-16 sm:px-6">
-                <div className="flex min-w-0 items-center gap-2.5 text-sm">
+            {/* relative: on phones the Export and Kernel menus hang from the whole header, not their button */}
+            <header className="@container relative flex h-14 shrink-0 items-center justify-between gap-3 border-b border-line bg-surface/70 px-3 backdrop-blur sm:h-16 sm:px-6">
+                <div className="flex min-w-28 items-center gap-2.5 text-sm" title={summary?.filename}>
                     {!sidebarOpen && (
                         <button
                             onClick={onToggleSidebar}

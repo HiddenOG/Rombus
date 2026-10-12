@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Cpu, ChevronDown, Play, RotateCcw, FastForward, Eraser } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
 
@@ -20,6 +20,8 @@ export function KernelMenu({ nb }) {
     }, [open]);
 
     const choose = (fn) => () => { setOpen(false); fn(); };
+    // Stable, so the dialog doesn't re-run its setup (and re-grab focus) on every render
+    const closeConfirm = useCallback(() => setConfirm(null), []);
     const items = [
         { icon: Play, label: 'Run all', text: 'Re-run every chart and retrain models on the current data.', onClick: choose(() => nb.runAll(false)) },
         { icon: RotateCcw, label: 'Restart', text: "Clear trained models and the AI's memory; rebuild the data from scratch.", onClick: choose(() => setConfirm('restart')) },
@@ -28,7 +30,7 @@ export function KernelMenu({ nb }) {
     ];
 
     return (
-        <div ref={ref} className="relative">
+        <div ref={ref} className="sm:relative">
             <button
                 onClick={() => setOpen(o => !o)}
                 disabled={disabled}
@@ -41,7 +43,7 @@ export function KernelMenu({ nb }) {
                 <ChevronDown className="h-3 w-3" />
             </button>
             {open && (
-                <div role="menu" className="absolute right-0 top-full z-30 mt-1.5 w-72 rounded-xl border border-line bg-surface p-1.5 shadow-lg animate-in">
+                <div role="menu" className="absolute inset-x-3 top-full z-30 mt-1.5 rounded-xl border border-line bg-surface p-1.5 shadow-lg animate-in sm:inset-x-auto sm:right-0 sm:w-72">
                     {items.map(({ icon: Icon, label, text, onClick }) => (
                         <button key={label} role="menuitem" onClick={onClick} className="flex w-full gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-surface-2">
                             <Icon className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
@@ -62,7 +64,8 @@ export function KernelMenu({ nb }) {
                 title={confirm === 'restartRun' ? 'Restart and run everything?' : 'Restart the notebook?'}
                 confirmLabel={confirm === 'restartRun' ? 'Restart & run all' : 'Restart'}
                 busy={nb.isProcessing}
-                onCancel={() => setConfirm(null)}
+                tone="caution"
+                onCancel={closeConfirm}
                 onConfirm={() => {
                     const runAfter = confirm === 'restartRun';
                     setConfirm(null);

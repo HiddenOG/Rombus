@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { UserRound, LogIn, LogOut, X } from 'lucide-react';
+import { Overlay } from './Overlay';
 
 /**
  * AccountPanel — the sidebar footer: who's signed in, or an invitation to sign in so notebooks
@@ -88,7 +89,7 @@ function AuthDialog({ account, onClose }) {
     const field = 'w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100';
 
     return (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-4 backdrop-blur-[2px] animate-in sm:items-center" onClick={onClose}>
+        <Overlay onClose={onClose}>
             <form
                 role="dialog"
                 aria-modal="true"
@@ -152,6 +153,6 @@ function AuthDialog({ account, onClose }) {
                     </button>
                 </p>
             </form>
-        </div>
+        </Overlay>
     );
 }
