@@ -189,6 +189,14 @@ export async function restartSession(sessionId) {
     return apiRequest(`/api/session/${sessionId}/restart`, { method: 'POST' });
 }
 
+/** Undo several recipe steps as one change (one replay; refused as a whole if the rest can't run). */
+export async function deleteSteps(sessionId, stepIds) {
+    return apiRequest(`/api/session/${sessionId}/recipe/delete`, {
+        method: 'POST',
+        body: JSON.stringify({ step_ids: stepIds }),
+    });
+}
+
 export async function deleteStep(sessionId, stepId) {
     return apiRequest(`/api/session/${sessionId}/recipe/${stepId}`, { method: 'DELETE' });
 }

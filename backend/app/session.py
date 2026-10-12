@@ -169,6 +169,16 @@ class DataSession:
         self._set_recipe(self.recipe[:index] + self.recipe[index + 1:])
         return removed
 
+    def delete_steps(self, step_ids: List[str]) -> List[Line]:
+        """Remove several lines as ONE change: replay once, and refuse the whole change if what's
+        left can't run (rather than stopping halfway through a one-by-one undo)."""
+        wanted = set(step_ids)
+        removed = [l for l in self.recipe if l.id in wanted]
+        if not removed:
+            raise ValueError("None of those steps are in the recipe any more.")
+        self._set_recipe([l for l in self.recipe if l.id not in wanted])
+        return removed
+
     def index_of(self, step_id: str) -> int:
         for i, line in enumerate(self.recipe):
             if line.id == step_id:

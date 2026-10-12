@@ -7,6 +7,8 @@ import { StageProgress } from './StageProgress';
 import { Logo } from './Logo';
 import { NoteCell, AskCell, RunCell } from './Cells';
 import { StepEditor } from './StepEditor';
+import { Selectable, SelectionBar } from './CellSelection';
+import { useCellSelection } from '../hooks/useCellSelection';
 
 const humanize = (s) => s.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
 
@@ -22,6 +24,7 @@ export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
         endRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [cells.length, lastCell?.status]);
     const recipeById = Object.fromEntries((summary?.recipe || []).map(s => [s.id, s]));
+    const selection = useCellSelection(cells);
     // Number every cell except notes, like Jupyter's [1] [2] [3]
     const numbers = {};
     cells.filter(c => c.type !== 'note').forEach((c, i) => { numbers[c.id] = i + 1; });
@@ -59,13 +62,13 @@ export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
                 <div className="mx-auto max-w-3xl space-y-4 px-3 py-5 sm:py-8 sm:pl-2 sm:pr-6">
                     {!sessionId && <EmptyState onUpload={nb.upload} isProcessing={isProcessing} />}
                     {cells.map(cell => {
-                        if (cell.type === 'note') return <NoteCell key={cell.id} cell={cell} />;
-                        if (cell.type === 'ask') {
-                            return <AskCell key={cell.id} cell={cell} number={numbers[cell.id]} onRun={nb.run} isProcessing={isProcessing} />;
-                        }
-                        return (
+                        let content;
+                        if (cell.type === 'note') content = <NoteCell cell={cell} />;
+                        else if (cell.type === 'ask') {
+                            content = <AskCell cell={cell} number={numbers[cell.id]} onRun={nb.run} isProcessing={isProcessing} />;
+                        } else content = (
                             <RunCell
-                                key={`${cell.id}-${cell.tool}`}
+                                key={cell.tool}
                                 cell={cell}
                                 number={numbers[cell.id]}
                                 tool={tools[cell.tool]}
@@ -86,11 +89,15 @@ export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
                                 onRerun={nb.rerun}
                             />
                         );
+                        return <Selectable key={cell.id} id={cell.id} selection={selection}>{content}</Selectable>;
                     })}
                     <div ref={endRef} />
                 </div>
             </div>
 
+            <div className="px-3 sm:px-6">
+                <SelectionBar nb={nb} selection={selection} />
+            </div>
             <CommandBar nb={nb} />
         </main>
     );

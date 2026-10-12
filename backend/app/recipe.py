@@ -397,7 +397,21 @@ class AddColumn(Step):
             raise ValueError("Give the new column a name.")
         if name in train.columns:
             raise ValueError(f"There's already a column called '{name}'.")
-        evaluate_formula(self._without_target(train), self.args.get("formula", ""))
+        formula = self.args.get("formula", "")
+        try:
+            evaluate_formula(self._without_target(train), formula)
+        except ValueError:
+            if self.ctx.target and self.ctx.target in train.columns:
+                try:  # does it only fail because it uses the target?
+                    evaluate_formula(train, formula)
+                except ValueError:
+                    raise
+                raise ValueError(
+                    f"'{self.ctx.target}' is the column you're predicting, so it can't go into a new feature: "
+                    f"for a new row you won't know its {self.ctx.target} (that's what the model is for), so "
+                    f"the feature couldn't be made. To spot odd values, use a view (Group & summarise, Filter "
+                    f"rows); to drop extreme rows from training, use Remove rows where…") from None
+            raise
         return {}
 
     def _without_target(self, df):

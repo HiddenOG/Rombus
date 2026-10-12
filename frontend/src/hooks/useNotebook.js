@@ -271,6 +271,19 @@ export function useNotebook() {
         setCells(prev => prev.filter(c => c.id !== cell.id));
     });
 
+    // Delete several cells; the recipe steps among them are undone together, as one change
+    const deleteCells = (ids) => busy(async () => {
+        const chosen = cells.filter(c => ids.includes(c.id));
+        const stepIds = chosen.map(c => c.stepId).filter(id => id && summary?.recipe?.some(s => s.id === id));
+        if (stepIds.length) {
+            const data = await api.deleteSteps(sessionId, stepIds);
+            setSummary(data.new_state_summary);
+            addCell({ type: 'note', text: data.message });
+        }
+        setCells(prev => prev.filter(c => !ids.includes(c.id)));
+        return true;
+    });
+
     const copyCell = (cell) => run({ tool: cell.tool, arguments: cell.args }, cell.id);
 
     // Change an action cell's settings and run it again in place (e.g. re-lock at 30%)
@@ -362,6 +375,7 @@ export function useNotebook() {
         runAll,
         clearOutputs,
         deleteCell,
+        deleteCells,
         copyCell,
         openNotebook,
         newNotebook,

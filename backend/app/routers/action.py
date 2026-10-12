@@ -6,6 +6,7 @@ from app.access import current_owner, enforce, load_owned
 from app.models import ActionRequest, ActionResponse
 from app.session import DataSession, run_exclusive, session_manager
 from app.tools import execute_tool
+from app.workflow_context import follow_stage
 
 router = APIRouter()
 
@@ -31,6 +32,9 @@ def _run(session: DataSession, request: ActionRequest) -> ActionResponse:
             success=False,
             message=result.get("message", "Action failed."),
         )
+
+    # The stage tracker follows the work (exploring moves it to Explore, and so on), only forward
+    session.current_stage = follow_stage(session.current_stage, request.tool)
 
     if session.models_cleared and request.tool not in ("train_test_split", "train_models", "auto_ml"):
         result["message"] += " Trained models were cleared because the data changed; train again to use them."

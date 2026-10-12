@@ -32,8 +32,10 @@ INSTRUCTIONS:
    Whenever you recommend an action, CALL its function in the same reply: that call is what puts the
    Run button in front of the user. Never say you are running, doing or about to run something
    ("let me run it now"); say what you suggest, and call the function.
-3. Guide the user through the ASEMIC stages in order, using the column evidence in the
-   session state (e.g. imputation for columns with missing values, encoding for categorical columns).
+3. The ASEMIC stages are a guide, not gates. Follow the user's lead: when they ask for something, help
+   with that, at any stage. When they ask what's next, use the session state: the RECIPE lists every
+   step already done WITH its settings, and the columns show their current types and blanks. Never
+   suggest a step that's already in the recipe, or cleaning a column that's already numeric.
 4. Use ONLY exact column names from the session state. Never invent column names.
 5. When cleaning or encoding many columns, prefer the batch tools (impute_all_missing,
    encode_all_categorical, scale_all_features).
@@ -48,6 +50,8 @@ INSTRUCTIONS:
    that exist. Don't describe results you haven't seen: a suggestion hasn't run until the user clicks it.
 9. Removing a COLUMN (remove_columns) is not dropping ROWS with blanks (drop_missing_rows). "Drop the
    nulls in size" means the rows where size is blank.
+10. Never build a feature (add_column) from the TARGET column: a new row won't have it. E.g. with target
+   price, price / total_sqft is not allowed as a feature.
 """.strip()
 
 
@@ -101,6 +105,24 @@ def tool_specs_for(session: Optional[DataSession] = None) -> List[Dict[str, Any]
     return specs
 
 
+def recipe_lines(recipe: List[Dict[str, Any]]) -> str:
+    """Each step with its settings, e.g. clean_numeric_string(column=total_sqft). Names alone made the
+    AI suggest steps that had already been done ("clean total_sqft?" ... "we did that already")."""
+    if not recipe:
+        return "none yet"
+
+    def settings_of(step):
+        shown = []
+        for key, value in step["args"].items():
+            if key in ("code", "based_on"):
+                continue
+            text = ", ".join(map(str, value)) if isinstance(value, list) else str(value)
+            shown.append(f"{key}={text[:60]}")
+        return f"{step['tool']}({'; '.join(shown)})"
+
+    return " → ".join(settings_of(s) for s in recipe)
+
+
 def state_snapshot(session: DataSession) -> str:
     """The session as it is right now: stage, dataset, lock status, columns."""
     state = session.get_summary()
@@ -122,7 +144,7 @@ DATASET: {state['filename']} ({state['shape'][0]} rows × {state['shape'][1]} co
 TARGET: {state['target']} | PROBLEM: {state['problem_type']}
 TEST ROWS: {split_status}
 TRAINED MODELS: {', '.join(state['trained_models']) or 'None'}
-RECIPE ({len(state['recipe'])} steps, all editable): {', '.join(s['tool'] for s in state['recipe']) or 'none yet'}
+RECIPE ({len(state['recipe'])} steps, all editable, in order): {recipe_lines(state['recipe'])}
 TEST ROWS LOCKED {state['lock_count']} TIME(S)
 COMPLETED STEPS: {', '.join(state['completed_steps'][-10:]) or 'None'}
 YOUR LAST REPLY OFFERED RUN BUTTONS FOR: {', '.join(last_suggestions(session)) or 'nothing'} (they only run when the user clicks them)

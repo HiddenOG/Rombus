@@ -202,6 +202,20 @@ async def restart(session_id: str, visitor: str = Depends(current_owner)):
     return await _change(session_id, visitor, change)
 
 
+class StepIds(BaseModel):
+    step_ids: List[str] = Field(min_length=1, max_length=500)
+
+
+@router.post("/session/{session_id}/recipe/delete")
+async def delete_steps(session_id: str, body: StepIds, visitor: str = Depends(current_owner)):
+    """Undo several steps at once: one replay, all or nothing."""
+    def change(session):
+        removed = session.delete_steps(body.step_ids)
+        names = ", ".join(l.tool.replace("_", " ") for l in removed)
+        return f"Removed {len(removed)} step{'s' if len(removed) != 1 else ''} ({names}) and replayed the rest of the recipe."
+    return await _change(session_id, visitor, change)
+
+
 @router.delete("/session/{session_id}/recipe/{step_id}")
 async def delete_step(session_id: str, step_id: str, visitor: str = Depends(current_owner)):
     def change(session):
