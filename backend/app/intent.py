@@ -102,6 +102,32 @@ def _offer(session: DataSession, name: str, allowed: set, why: str) -> Optional[
     return {"tool": name, "arguments": {}, "explanation": why}
 
 
+# Judgement calls the AI may only suggest when the user asks for that kind of change. Each is allowed
+# when the user's message contains one of its words (typos tolerated by the stems).
+ON_REQUEST = {
+    "remove_outliers": r"outlier|extreme|unusual|odd|weird|anomal|std|standard dev|iqr",
+    "drop_rows_where": r"drop\w*|remov\w*|delet\w*|exclud\w*|filter\w*|get rid|rows? (where|with)",
+    "group_rare_categories": r"rare|other|group\w*|merge|combin\w*|reduce\w*|too many|categor\w*|dimension",
+    "add_column": r"new (column|feature)|feature|add\w* (a )?column|create\w*|ratio|formula|per\b|engineer\w*|combin\w*|deriv\w*",
+    "change_type": r"type|convert\w*|astype|int\w*|float|numer\w*|whole number|text|string",
+    "rename_column": r"renam\w*|name",
+    "fill_value": r"fill\w*|replac\w*|impute|blank|null|nan|missing|zero|unknown",
+}
+
+
+def asked_for(tool: str, message: str, session: Optional[DataSession] = None) -> bool:
+    """Whether the user asked for this kind of change (always true for ordinary steps).
+    A short "yes / do it" also counts what the copilot proposed just before: agreeing is asking."""
+    words = ON_REQUEST.get(tool)
+    if words is None:
+        return True
+    request = message
+    if session is not None and FOLLOW_UP.match(message) and len(message.split()) <= 6:
+        earlier = [m["content"] for m in session.memory[:-1] if m.get("role") == "assistant"]
+        request += " " + (earlier[-1] if earlier else "")
+    return bool(re.search(words, request.lower()))
+
+
 def _named_columns(session: DataSession, text: str) -> List[str]:
     return [c for c in session.df.columns
             if c != session.target_column and re.search(rf"(?<![\w]){re.escape(str(c).lower())}(?![\w])", text)]

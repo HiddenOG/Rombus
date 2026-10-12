@@ -52,6 +52,10 @@ INSTRUCTIONS:
    nulls in size" means the rows where size is blank.
 10. Never build a feature (add_column) from the TARGET column: a new row won't have it. E.g. with target
    price, price / total_sqft is not allowed as a feature.
+11. ONLY WHEN THE USER ASKS for that kind of change, suggest: remove_outliers, drop_rows_where,
+   group_rare_categories, add_column, change_type, rename_column, fill_value. They are the user's
+   judgement calls (which rows to drop, which features to make). Unasked, don't suggest them; you may
+   mention the idea in words if it would clearly help.
 """.strip()
 
 

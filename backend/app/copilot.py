@@ -11,7 +11,7 @@ from typing import Awaitable, Callable, Dict, List, Tuple
 
 from app.config import settings
 from app.copilot_prompt import failure
-from app.intent import obvious_step
+from app.intent import asked_for, obvious_step
 from app.session import DataSession
 
 logger = logging.getLogger(__name__)
@@ -76,6 +76,12 @@ async def get_copilot_response(session: DataSession, user_message: str) -> dict:
         if not reason:
             reply["provider"] = label
             reply.setdefault("model", model())
+            # Judgement-call steps (outliers, dropping rows, new features...) only when the user asked
+            suggested = reply.get("suggested_actions") or []
+            kept = [a for a in suggested if asked_for(a["tool"], user_message, session)]
+            if len(kept) < len(suggested):
+                logger.info("Dropped unrequested suggestions: %s", [a["tool"] for a in suggested if a not in kept])
+                reply["suggested_actions"] = kept
             if not reply.get("suggested_actions"):
                 # The safety net: an obvious request still gets its Run button (see app/intent.py)
                 step = obvious_step(session, user_message)
