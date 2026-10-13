@@ -66,7 +66,7 @@ const App = () => {
           onDeleteNotebook={nb.deleteNotebook}
           account={account}
         />
-        <Notebook nb={nb} sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
+        <Notebook nb={nb} signedIn={Boolean(account.user)} sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
       </div>
     </ErrorBoundary>
   );

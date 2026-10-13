@@ -14,15 +14,22 @@ ENV PYTHONUNBUFFERED=1 \
     MPLCONFIGDIR=/tmp/matplotlib \
     PORT=8000
 
+# libseccomp: the code sandbox uses it to take the network and starting programs away from code cells
+RUN apt-get update && apt-get install -y --no-install-recommends libseccomp2 && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /install /usr/local
 
-# Run as an ordinary user, not root: if anything ever went wrong, it can't touch the system
-RUN useradd --create-home appuser && mkdir -p /app/data && chown appuser:appuser /app/data
+# 'appuser' runs the app. Code cells each run as a throwaway user id of their own (see
+# app/sandbox_runner.py), so they can't read the app's data (owner-only) or its process
+RUN useradd --create-home appuser \
+    && mkdir -p /app/data && chown appuser:appuser /app/data && chmod 700 /app/data
 COPY --chown=appuser:appuser app/ ./app/
-USER appuser
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8000
 
-# ONE worker on purpose: rate limits, the per-notebook queue and the in-memory notebook cache
+# Starts as root only to launch the code sandbox server, then runs the app as 'appuser'.
+# ONE app worker on purpose: rate limits, the per-notebook queue and the in-memory notebook cache
 # live inside the process. Scale up with a bigger machine, not more workers.
-CMD ["sh", "-c", "exec uvicorn app:app --host 0.0.0.0 --port ${PORT} --workers 1 --timeout-keep-alive 75"]
+CMD ["/usr/local/bin/docker-entrypoint.sh"]

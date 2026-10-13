@@ -23,8 +23,13 @@ async def health_check():
 @router.get("/config")
 async def public_config():
     """What this server allows, so the interface only offers what works here."""
+    from app.sandbox import status
+    from starlette.concurrency import run_in_threadpool
+    code = await run_in_threadpool(status)  # the first call may run the sandbox's self-test
     return {
-        "custom_code": settings.ALLOW_CUSTOM_CODE,
+        "custom_code": code["enabled"],
+        "code_for": settings.CODE_FOR,  # "accounts": anonymous visitors are asked to sign in to run code
+        "sandbox": code.get("sandbox"),
         "max_upload_mb": settings.MAX_UPLOAD_SIZE_MB,
         "max_rows": settings.MAX_ROWS,
     }

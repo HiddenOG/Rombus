@@ -159,6 +159,10 @@ class CodeUpdate(BaseModel):
 async def update_step_code(session_id: str, step_id: str, body: CodeUpdate, visitor: str = Depends(current_owner)):
     """Save edited code for a step. A built-in step becomes a custom code step (and remembers what it was)."""
     def change(session):
+        from app.sandbox import not_allowed
+        reason = not_allowed(session)
+        if reason:
+            raise ValueError(reason)
         current = session.recipe[session.index_of(step_id)]
         based_on = current.args.get("based_on") if current.tool == "custom_code" else {"tool": current.tool, "args": current.args}
         args = {"code": body.code, **({"based_on": based_on} if based_on else {})}

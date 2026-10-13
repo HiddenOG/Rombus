@@ -49,9 +49,20 @@ class Settings(BaseSettings):
     # Tried in order when the main model is busy (comma-separated)
     GEMINI_FALLBACK_MODELS: str = "gemini-2.5-flash-lite"
 
-    # Run user-written Python in custom code steps. It runs with full access to this machine,
-    # like a Jupyter cell: fine on your own laptop, but MUST be false on any shared/public server.
+    # Code cells (user- or AI-written Python). Code never runs inside the app: it runs in a sandbox
+    # process (app/sandbox.py), chosen by CODE_SANDBOX:
+    #   local     your own machine: a separate worker with a time limit, no other protection
+    #   hardened  a server: another user, memory/CPU limits, no network, no starting programs (Linux,
+    #             the Dockerfile starts it); falls back to Modal if its self-test fails and Modal is set
+    #   modal     a hosted Modal sandbox (MODAL_TOKEN_ID / MODAL_TOKEN_SECRET)
     ALLOW_CUSTOM_CODE: bool = True
+    CODE_SANDBOX: str = "local"
+    CODE_FOR: str = "everyone"  # or "accounts": only notebooks in a signed-in account may run code
+    CODE_TIME_LIMIT_SECONDS: int = 60  # per cell (training custom models gets 5x)
+    CODE_MEMORY_MB: int = 2048
+    SANDBOX_SOCKET: str = "/run/rhombus/sandbox.sock"
+    MODAL_TOKEN_ID: str = ""
+    MODAL_TOKEN_SECRET: str = ""
 
     # CORS: the sites allowed to call this API (comma-separated). Set to your real site when deployed.
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"

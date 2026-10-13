@@ -60,6 +60,14 @@ jobs:
           docker run -d --name api -e PORT=8000 -p 8000:8000 rhombus-backend
           for i in $(seq 1 30); do curl -fs localhost:8000/api/health && exit 0; sleep 2; done
           docker logs api; exit 1
+      # The deployed setup: code cells on, in the hardened sandbox. Then attack it like a visitor would
+      - name: Code sandbox holds (escape attempts through the API)
+        run: |
+          docker run -d --name sandboxed -p 8001:8000 -e PORT=8000 -e ALLOW_CUSTOM_CODE=true \
+            -e CODE_SANDBOX=hardened -e CODE_TIME_LIMIT_SECONDS=10 -e RATE_LIMITS=false \
+            -e SUPABASE_SECRET_KEY=fake-secret-for-the-test rhombus-backend
+          for i in $(seq 1 30); do curl -fs localhost:8001/api/health >/dev/null && break; sleep 2; done
+          python3 backend/scripts/check_sandbox.py http://localhost:8001 || (docker logs sandboxed; exit 1)
 
   audit:
     name: Dependency audit (known vulnerabilities)

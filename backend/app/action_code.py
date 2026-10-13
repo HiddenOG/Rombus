@@ -431,9 +431,10 @@ def models_template(session: DataSession, algorithms) -> str:
 def code_info(session: DataSession, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """The code for a cell, and whether / how it can be edited."""
     info = _code_info(session, tool, args or {})
-    if not settings.ALLOW_CUSTOM_CODE and info["custom_tool"]:
-        info.update(custom_tool=None, template=None,
-                    protected="Editing code is switched off on this server (it would let visitors run code here).")
+    from app.sandbox import not_allowed
+    reason = not_allowed(session)
+    if reason and info["custom_tool"]:
+        info.update(custom_tool=None, template=None, protected=reason)
     return info
 
 

@@ -84,7 +84,7 @@ or a CHANGE cell.
 """.strip()
 
 NO_CODE_RULES = """
-Running code is switched off on this server, so a ```python cell can't run here. Use a built-in step
+Code can't run in this notebook (switched off on this server, or it needs a signed-in account). Use a built-in step
 whenever one fits; if none does, say so plainly and suggest the closest built-in, or write the code
 only if they ask for it (they can run it on their own machine).
 """.strip()
@@ -466,30 +466,24 @@ DRY_RUN_ROWS = 50_000
 def code_problem(session: DataSession, code: str) -> Optional[str]:
     """Why this code won't work, found by a syntax check and a trial run on a copy of (some of) the
     training rows. None when it runs. The notebook itself never changes."""
-    from app.recipe import Line, run_line
-    from app.user_code import run_user_code
+    from app import sandbox
     error = syntax_error(code)
     if error:
         return f"a syntax error ({error})"
-    if not settings.ALLOW_CUSTOM_CODE:
-        return None  # code can't run on this server: nothing more to check
-    rows = session.df.head(DRY_RUN_ROWS).copy()
+    if sandbox.not_allowed(session):
+        return None  # code can't run for this notebook: nothing more to check
+    rows = session.df.head(DRY_RUN_ROWS)
+    kind = cell_kind(code)
+    if kind == "models":
+        if not session.target_column or session.target_column not in rows:
+            return None
+        frames = {"X_learn": rows.drop(columns=[session.target_column]), "y_learn": rows[[session.target_column]]}
+    else:
+        frames = {"train": rows}
     try:
-        kind = cell_kind(code)
-        if kind == "change":
-            run_line(Line("custom_code", {"code": code}), rows, session.ctx)
-        elif kind == "models":
-            features = rows.drop(columns=[session.target_column], errors="ignore")
-            target = rows[session.target_column] if session.target_column in rows else None
-            models = run_user_code(code, {"X_learn": features, "y_learn": target}).namespace.get("models")
-            if not isinstance(models, dict) or not all(hasattr(m, "fit") and hasattr(m, "predict") for m in models.values()):
-                return "`models` must be a dict of {name: model with fit() and predict()}"
-        else:
-            run_user_code(code, {"train": rows, "df": rows})
+        sandbox.run({"kind": "check", "cell": kind, "code": code, "frames": frames})  # in the sandbox, like Run
     except ValueError as e:
         return f"an error when run: {e}"
-    except Exception as e:
-        return f"an error when run: {type(e).__name__}: {e}"
     return None
 
 
@@ -538,7 +532,8 @@ def system_prompt(session: DataSession) -> str:
                      f"- Using '{target}' to choose which TRAINING rows to drop is fine and common (outliers in "
                      f"{target} per sqft, rules comparing groups): remove_outliers, drop_rows_where, or a TRAIN_ONLY "
                      f"change cell. Do those normally.")
-    if not settings.ALLOW_CUSTOM_CODE:
+    from app.sandbox import not_allowed
+    if not_allowed(session):
         parts.append(NO_CODE_RULES)
     parts.append("BUILT-INS AVAILABLE NOW:\n" + catalogue(session))
     return "\n\n".join(parts)

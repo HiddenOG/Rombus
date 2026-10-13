@@ -68,9 +68,9 @@ def test_before_the_lock_only_the_start_is_offered():
 
 def test_without_code_the_prompt_says_so(session, monkeypatch):
     monkeypatch.setattr(settings, "ALLOW_CUSTOM_CODE", False)
-    assert "Running code is switched off" in system_prompt(session)
+    assert "Code can't run in this notebook" in system_prompt(session)
     monkeypatch.setattr(settings, "ALLOW_CUSTOM_CODE", True)
-    assert "Running code is switched off" not in system_prompt(session)
+    assert "Code can't run in this notebook" not in system_prompt(session)
 
 
 # ── Checking a proposed step ─────────────────────────────────────────────────

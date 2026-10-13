@@ -92,6 +92,12 @@ def execute_tool(tool_name: str, session: DataSession, args: Dict[str, Any]) -> 
                        "only preview a few rows.",
         }
 
+    if tool_name in ("custom_view", "custom_code", "custom_models"):
+        from app.sandbox import not_allowed
+        reason = not_allowed(session)
+        if reason:
+            return {"success": False, "message": reason}
+
     # An argument sent as null (LLMs often do this) means "not provided": let the tool use its default
     args = {k: v for k, v in (args or {}).items() if v is not None}
 

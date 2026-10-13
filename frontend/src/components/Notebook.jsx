@@ -16,8 +16,11 @@ const humanize = (s) => s.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase()
 /**
  * Notebook — the session as numbered cells, plus the bar for asking and adding steps.
  */
-export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
+export function Notebook({ nb, signedIn = false, sidebarOpen, onToggleSidebar }) {
     const { sessionId, summary, cells, tools, isProcessing } = nb;
+    // Why code can't run here, if it can't: switched off on this server, or it needs an account
+    const codeBlocked = !nb.config.custom_code ? 'off'
+        : nb.config.code_for === 'accounts' && !signedIn ? 'signin' : null;
     const endRef = useRef(null);
     // Scroll to the newest cell when one is added or an answer arrives
     const lastCell = cells[cells.length - 1];
@@ -70,7 +73,7 @@ export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
                                 <CodeCell
                                     cell={cell}
                                     isProcessing={isProcessing}
-                                    canRun={nb.config.custom_code}
+                                    codeBlocked={codeBlocked}
                                     onChange={nb.editCodeCell}
                                     onRun={nb.runCode}
                                 />
@@ -87,7 +90,7 @@ export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
                                 summary={summary}
                                 sessionId={sessionId}
                                 isProcessing={isProcessing}
-                                customCodeAllowed={nb.config.custom_code}
+                                customCodeAllowed={!codeBlocked}
                                 onEdit={nb.editStep}
                                 onEditCode={nb.editCode}
                                 onRevert={nb.revertCell}

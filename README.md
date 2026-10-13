@@ -118,9 +118,18 @@ Supabase: Auth (accounts), Postgres (notebook records), Storage (private bucket 
 - **Isolation:** every notebook has an owner. Anyone else gets "not found", never "forbidden",
   so the server doesn't reveal that a notebook exists. The database table has Row Level Security
   switched on, so the public browser key can't read it. Data files live in a private bucket.
-- **Custom code:** users can write their own steps, views and models, like a Jupyter cell. That code
-  runs with the server's permissions, so it is **switched off** (`ALLOW_CUSTOM_CODE=false`) on any
-  shared deployment. The check sits where code runs, not in each route.
+- **Code sandbox:** code cells (written by people or the assistant) never run inside the app. Each
+  run happens in a separate process ([sandbox.py](backend/app/sandbox.py),
+  [sandbox_runner.py](backend/app/sandbox_runner.py)) and only plain data comes back: tables as
+  Parquet, values as JSON, trained models as skops files that load only scikit-learn parts. On the
+  server (`CODE_SANDBOX=hardened`) a small root process forks each run, which then, before any user
+  code: switches to a throwaway user id of its own (no access to the app's files, its process or
+  other runs), gets memory, CPU, file and process limits and a wall-clock timeout, and loses the
+  network and the ability to start programs (seccomp). A self-test checks all of it at startup;
+  if it fails, code runs in a [Modal](https://modal.com) sandbox if one is configured, or stays
+  off. CI attacks a real container through the API ([check_sandbox.py](backend/scripts/check_sandbox.py)).
+  `CODE_FOR=accounts` limits code to signed-in users. It shares the server's kernel, so for
+  sensitive data, use `CODE_SANDBOX=modal` (a gVisor sandbox per server).
 - **Abuse limits:** per-user and per-network rate limits for AI, uploads and training. A daily AI
   budget. Request size caps. A cap on one-hot encoding (an ID column could otherwise add thousands
   of columns). Only the most recently used notebooks stay in memory.
@@ -166,7 +175,7 @@ The repo deploys as two Railway services, each built from its own Dockerfile.
 
    | Service | Root directory | Config file | Variables |
    |---|---|---|---|
-   | backend | `backend` | `/backend/railway.json` | AI keys + `AI_CHAIN`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `DATABASE_URL`, `ALLOW_CUSTOM_CODE=false`, `SESSION_TTL_HOURS=72`, `CORS_ORIGINS=https://<frontend domain>` |
+   | backend | `backend` | `/backend/railway.json` | AI keys + `AI_CHAIN`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `DATABASE_URL`, `ALLOW_CUSTOM_CODE=true`, `CODE_SANDBOX=hardened`, `CODE_FOR=accounts`, optionally `MODAL_TOKEN_ID` + `MODAL_TOKEN_SECRET` (fallback sandbox), `SESSION_TTL_HOURS=72`, `CORS_ORIGINS=https://<frontend domain>` |
    | frontend | `frontend` | `/frontend/railway.json` | `VITE_API_URL=https://<backend domain>`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` |
 
    Generate a public domain for each service. Then set `CORS_ORIGINS` and `VITE_API_URL` to the

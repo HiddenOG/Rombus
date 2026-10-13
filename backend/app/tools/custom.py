@@ -9,7 +9,7 @@ from typing import Any, Dict
 
 from app.session import DataSession
 from app.tools import register_tool
-from app.user_code import result_evidence, run_user_code
+from app import sandbox
 
 VIEW_TEMPLATE = '''import numpy as np
 import pandas as pd
@@ -43,13 +43,8 @@ CODE_SPEC = {"type": "string", "format": "code", "description": "Python code."}
     ai=False,
 )
 def custom_view(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
-    rows = session.df.copy()
-    run = run_user_code(args.get("code") or "", {"train": rows, "df": rows})  # df: the name pandas habit reaches for
-    evidence = result_evidence(run.namespace.get("result"))
-    if run.output:
-        evidence["output"] = (evidence.get("output", "") + "\n" + run.output).strip()
-    if run.images:
-        evidence["images"] = run.images
+    # In the sandbox, on a copy of the training rows (also called df: the name pandas habit reaches for)
+    evidence = sandbox.run({"kind": "view", "code": args.get("code") or "", "frames": {"train": session.df}})["evidence"]
     if not evidence:
         return {"success": True, "message": "Your code ran but showed nothing. Set `result`, print(), or draw a chart."}
     return {"success": True, "message": "Custom view ran on the training rows.", "evidence": evidence}
@@ -64,31 +59,32 @@ def custom_view(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     ai=False,
 )
 def custom_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
-    from app.tools.model import ensure_practice_split, finish_training, fit_and_score, safe_cv_folds
+    from app.tools.model import ensure_practice_split, finish_training, safe_cv_folds
 
     auto_split = ensure_practice_split(session)
-    run = run_user_code(args.get("code") or "", {
-        "X_learn": session.X_train.copy(), "y_learn": session.y_train.copy(),
+    # Built, trained and scored in the sandbox (exactly like fit_and_score does for built-in models);
+    # the trained models come back as skops files, loaded here only if they're scikit-learn parts
+    done = sandbox.run({
+        "kind": "models", "code": args.get("code") or "", "problem_type": session.problem_type,
+        "cv": {"time": bool(session.time_column), "folds": safe_cv_folds(session, 5)},
+        "frames": {"X_learn": session.X_train, "y_learn": session.y_train.to_frame(),
+                   "X_check": session.X_test, "y_check": session.y_test.to_frame()},
     })
-    models = run.namespace.get("models")
-    if not isinstance(models, dict) or not models:
-        raise ValueError("Your code must define `models` as a dict like {\"name\": SomeModel()}.")
-    for name, model in models.items():
-        if not (hasattr(model, "fit") and hasattr(model, "predict")):
-            raise ValueError(f"'{name}' isn't a model: it needs fit() and predict() methods.")
-
-    cv_folds = safe_cv_folds(session, 5)
     results = []
-    for name, model in models.items():
-        try:
-            results.append(fit_and_score(session, str(name), model, cv_folds))
-        except Exception as e:
-            results.append({"model": str(name), "error": f"{type(e).__name__}: {e}"})
+    for result in done["results"]:
+        name = result["model"]
+        if name in done["fitted"]:
+            try:
+                session.trained_models[name] = sandbox.load_model(done["fitted"][name])
+                session.model_results[name] = result
+            except ValueError as e:
+                result = {"model": name, "error": str(e)}
+        results.append(result)
 
     best = finish_training(session, results)
-    msg = f"Trained {len(models)} custom model{'s' if len(models) != 1 else ''}. Best on the practice split: {best}."
+    msg = f"Trained {len(results)} custom model{'s' if len(results) != 1 else ''}. Best on the practice split: {best}."
     if auto_split:
         msg = f"{auto_split} {msg}"
-    if run.output:
-        msg += f"\n{run.output.strip()}"
+    if done.get("output"):
+        msg += f"\n{done['output'].strip()}"
     return {"success": True, "message": msg, "evidence": {"results": results, "best_model": best}}

@@ -11,8 +11,11 @@ services:
     environment:
       - PORT=8000
       - CORS_ORIGINS=http://localhost:3000
-      # User-written code runs with full access to the server: never allow it on a shared deployment
-      - ALLOW_CUSTOM_CODE=false
+      # Code cells run in the hardened sandbox (another user, limits, no network, no programs),
+      # and only for notebooks in a signed-in account
+      - ALLOW_CUSTOM_CODE=true
+      - CODE_SANDBOX=hardened
+      - CODE_FOR=accounts
       - RATE_LIMITS=true
     ports:
       - "8000:8000"

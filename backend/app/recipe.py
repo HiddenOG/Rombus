@@ -1183,53 +1183,30 @@ def _user_error(e: Exception) -> ValueError:
 
 @step_type("custom_code")
 class CustomCode(Step):
-    """A step written by the user. Runs on this machine with full access, like a Jupyter cell."""
+    """A step written by the user: learn(train) / apply(df, learned), run in the sandbox (app/sandbox.py),
+    never in the app. What it learns comes back as plain JSON, the rows as a table."""
     kind = "custom"
 
-    def _namespace(self) -> Dict[str, Any]:
-        from app.config import settings
-        if not settings.ALLOW_CUSTOM_CODE:
-            raise ValueError("Custom code is switched off on this server (ALLOW_CUSTOM_CODE=false).")
-        code = self.args.get("code") or ""
-        namespace: Dict[str, Any] = {"pd": pd, "np": np}
-        try:
-            exec(compile(code, CODE_FILENAME, "exec"), namespace)
-        except SyntaxError as e:
-            raise ValueError(f"Your code has a syntax error on line {e.lineno}: {e.msg}") from None
-        except Exception as e:
-            raise _user_error(e) from None
-        for fn in ("learn", "apply"):
-            if not callable(namespace.get(fn)):
-                raise ValueError(f"Your code must define a function called {fn}().")
-        return namespace
+    @property
+    def code(self) -> str:
+        return self.args.get("code") or ""
 
     @property
     def train_only(self) -> bool:
-        return bool(self._namespace().get("TRAIN_ONLY", False))
+        from app.sandbox_runner import UserError, train_only
+        try:
+            return train_only(self.code)  # read from the code's text: nothing has to run
+        except UserError as e:
+            raise ValueError(str(e)) from None
 
     def learn(self, train):
-        try:
-            learned = self._namespace()["learn"](train.copy())
-        except ValueError:
-            raise
-        except Exception as e:
-            raise _user_error(e) from None
-        if learned is None:
-            learned = {}
-        if not isinstance(learned, dict):
-            raise ValueError(f"learn() must return a dict (it returned {type(learned).__name__}).")
-        return _plain(learned)
+        from app import sandbox
+        self.train_only  # a bad TRAIN_ONLY is reported before anything runs
+        return sandbox.run({"kind": "learn", "code": self.code, "frames": {"train": train}})["learned"]
 
     def apply(self, df, learned):
-        try:
-            out = self._namespace()["apply"](df, learned)
-        except ValueError:
-            raise
-        except Exception as e:
-            raise _user_error(e) from None
-        if not isinstance(out, pd.DataFrame):
-            raise ValueError(f"apply() must return the rows as a DataFrame (it returned {type(out).__name__}).")
-        return out
+        from app import sandbox
+        return sandbox.run({"kind": "apply", "code": self.code, "learned": learned, "frames": {"df": df}})["frame"]
 
     def summary(self, before, after, learned):
         added = [c for c in after.columns if c not in before.columns]

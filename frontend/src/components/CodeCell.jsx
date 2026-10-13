@@ -7,7 +7,8 @@ import { PythonEditor } from './PythonEditor';
  * CodeCell — an unrun code cell, like Jupyter's: write (or read what the assistant wrote), pick its
  * kind, and run it. Once it runs it becomes a result cell in the same place, code still editable.
  */
-export function CodeCell({ cell, isProcessing, canRun, onChange, onRun }) {
+export function CodeCell({ cell, isProcessing, codeBlocked = null, onChange, onRun }) {
+    const canRun = !codeBlocked;
     const source = cell.source ?? '';
 
     const setKind = (kind) => {
@@ -65,10 +66,15 @@ export function CodeCell({ cell, isProcessing, canRun, onChange, onRun }) {
                     <Notice tone="amber" icon={AlertTriangle}>A trial run of this code found {cell.problem}. Fix it before running, or ask the assistant to.</Notice>
                 )}
                 {cell.error && <Notice tone="red" icon={AlertTriangle}>{cell.error}</Notice>}
-                {!canRun && (
+                {codeBlocked === 'signin' && (
                     <Notice tone="gray" icon={Lock}>
-                        Running your own code is switched off on this server (it needs a sandbox). It runs on your own
-                        machine: see the README.
+                        Running code needs an account: sign in from the sidebar (this notebook comes with you). Until
+                        then, the built-in steps and the assistant work as usual, and Export gives you the code.
+                    </Notice>
+                )}
+                {codeBlocked === 'off' && (
+                    <Notice tone="gray" icon={Lock}>
+                        Running code is switched off on this server. Export gives you the code to run on your own machine.
                     </Notice>
                 )}
 
