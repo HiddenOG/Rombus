@@ -89,7 +89,7 @@ export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
                                 onRerun={nb.rerun}
                             />
                         );
-                        return <Selectable key={cell.id} id={cell.id} selection={selection}>{content}</Selectable>;
+                        return <Selectable key={cell.id} cell={cell} nb={nb} selection={selection}>{content}</Selectable>;
                     })}
                     <div ref={endRef} />
                 </div>

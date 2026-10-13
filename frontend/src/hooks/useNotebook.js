@@ -276,6 +276,14 @@ export function useNotebook() {
         setCells(prev => prev.filter(c => c.id !== cell.id));
     });
 
+    // Undo one step: it leaves the recipe and the data is rebuilt without it. The cell stays (greyed
+    // out, marked "no longer in the recipe") so you can still see what it did.
+    const undoStep = (cell) => busy(async () => {
+        const data = await api.deleteSteps(sessionId, [cell.stepId]);
+        setSummary(data.new_state_summary);
+        addCell({ type: 'note', text: data.message });
+    });
+
     // Delete several cells; the recipe steps among them are undone together, as one change
     const deleteCells = (ids) => busy(async () => {
         const chosen = cells.filter(c => ids.includes(c.id));
@@ -381,6 +389,7 @@ export function useNotebook() {
         clearOutputs,
         deleteCell,
         deleteCells,
+        undoStep,
         copyCell,
         openNotebook,
         newNotebook,
