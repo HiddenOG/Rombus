@@ -35,8 +35,10 @@ export function Notebook({ nb, signedIn = false, sidebarOpen, onToggleSidebar })
 
     return (
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            {/* relative: on phones the Export and Kernel menus hang from the whole header, not their button */}
-            <header className="@container relative flex h-14 shrink-0 items-center justify-between gap-3 border-b border-line bg-surface/70 px-3 backdrop-blur sm:h-16 sm:px-6">
+            {/* relative: on phones the Export and Kernel menus hang from the whole header, not their button.
+                z-20: the blur and the container query make the header its own layer, which would keep
+                its menus underneath the cells; the whole header sits above them instead */}
+            <header className="@container relative z-20 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-line bg-surface/70 px-3 backdrop-blur sm:h-16 sm:px-6">
                 <div className="flex min-w-28 items-center gap-2.5 text-sm" title={summary?.filename}>
                     {!sidebarOpen && (
                         <button

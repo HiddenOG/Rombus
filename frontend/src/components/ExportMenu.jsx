@@ -70,6 +70,7 @@ export function ExportMenu({ nb }) {
                 disabled={disabled}
                 aria-haspopup="menu"
                 aria-expanded={open}
+                aria-label="Export"
                 title="Export"
                 className="flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-semibold text-ink-2 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
             >
