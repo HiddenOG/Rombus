@@ -96,14 +96,34 @@ ALGORITHM = {
 }
 
 
+# Leftover text columns with more values than this aren't one-hot encoded automatically: a date stored
+# as text, an ID or free text would become thousands of columns (and teach the model nothing)
+MAX_AUTO_ONEHOT = 100
+
+
+def ignored_columns(df: pd.DataFrame, target: str) -> List[str]:
+    """Columns a model can't use as they are: dates (use Date parts) and text with too many values."""
+    from app.expressions import looks_like_dates
+    X = df.drop(columns=[target], errors="ignore")
+    dates = [c for c in X.columns if pd.api.types.is_datetime64_any_dtype(X[c])]
+    text = categorical_columns(X)
+    # Dates stored as text: a column per day means nothing to a model, however few days there are
+    text_dates = [c for c in text if len(X) > 1 and looks_like_dates(X[c])]
+    wide = [c for c in text if c not in text_dates and X[c].nunique() > MAX_AUTO_ONEHOT]
+    return dates + text_dates + wide
+
+
 def model_features(df: pd.DataFrame, target: str) -> pd.DataFrame:
     """Turn cleaned rows into the all-numeric table a model needs.
 
     Used at training AND prediction time so both always build features the same way.
     Leftover text columns are one-hot encoded (keeping every category, so a single new row
-    still gets its own column) and remaining blanks become 0.
+    still gets its own column) and remaining blanks become 0. Dates and text with too many values
+    are left out (see ignored_columns). At prediction time a single row has one value per column,
+    so nothing is left out there; columns are lined up with training's afterwards.
     """
     X = df.drop(columns=[target], errors="ignore")
+    X = X.drop(columns=ignored_columns(X, target))
     text_cols = categorical_columns(X)
     if text_cols:
         X = pd.get_dummies(X, columns=text_cols, dtype=int)
@@ -141,7 +161,7 @@ def fit_and_score(session: DataSession, name: str, model: Any, cv_folds: int) ->
         }
 
     # Cross-validation: several mini-exams within the training part
-    cv_scores = cross_val_score(model, session.X_train, session.y_train, cv=cv_folds)
+    cv_scores = cross_val_score(model, session.X_train, session.y_train, cv=cv_splitter(session, cv_folds))
     result["cv_mean"] = round(float(cv_scores.mean()), 4)
     result["cv_std"] = round(float(cv_scores.std()), 4)
 
@@ -173,7 +193,14 @@ def ensure_practice_split(session: DataSession) -> str:
     result = do_train_test_split(session, {"stratify": session.problem_type == "classification"})
     if not result["success"]:
         raise ValueError(result["message"])
-    return f"(Made a practice split first: {len(session.X_train)} rows to learn from, {len(session.X_test)} to check against.)"
+    notes = []
+    if session.time_column:
+        notes.append("in time order: the check rows are the latest ones")
+    skipped = ignored_columns(session.df, session.target_column)
+    if skipped:
+        notes.append(f"Not used as model inputs: {skipped} (dates, or text with over {MAX_AUTO_ONEHOT} values)")
+    return (f"(Made a practice split first: {len(session.X_train)} rows to learn from, {len(session.X_test)} to "
+            f"check against{'; ' + '. '.join(notes) if notes else ''}.)")
 
 
 def safe_cv_folds(session: DataSession, requested: int) -> int:
@@ -206,15 +233,22 @@ def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str,
 
     X = model_features(session.df, session.target_column)
     y = session.df[session.target_column]
-    object_cols = categorical_columns(session.df.drop(columns=[session.target_column]))
+    skipped = ignored_columns(session.df, session.target_column)
+    object_cols = [c for c in categorical_columns(session.df.drop(columns=[session.target_column])) if c not in skipped]
 
-    # Stratifying needs at least 2 rows of every class; with a rarer class, split without it
-    can_stratify = session.problem_type == "classification" and y.value_counts().min() >= 2
-    stratify_param = y if stratify and can_stratify else None
-
-    session.X_train, session.X_test, session.y_train, session.y_test = train_test_split(
-        X, y, test_size=test_size, random_state=42, stratify=stratify_param
-    )
+    if session.time_column:
+        # Time order: learn from the earlier training rows, check against the later ones (never the reverse)
+        order = time_order(session.df, session.time_column)
+        X, y = X.loc[order], y.loc[order]
+        session.X_train, session.X_test, session.y_train, session.y_test = train_test_split(
+            X, y, test_size=test_size, shuffle=False)
+    else:
+        # Stratifying needs at least 2 rows of every class; with a rarer class, split without it
+        can_stratify = session.problem_type == "classification" and y.value_counts().min() >= 2
+        stratify_param = y if stratify and can_stratify else None
+        session.X_train, session.X_test, session.y_train, session.y_test = train_test_split(
+            X, y, test_size=test_size, random_state=42, stratify=stratify_param
+        )
 
     # TODO(piece 3): evaluate on the locked test rows instead of this practice split
     msg = (
@@ -222,10 +256,30 @@ def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str,
         f"{len(session.X_test)} to check against (test_size={test_size}). "
         f"The {len(session.test_df) if session.is_split else 0} locked test rows stay untouched."
     )
+    if session.time_column:
+        msg += f" In time order of '{session.time_column}': the check rows are the latest ones."
     if object_cols:
         msg += f" Auto-encoded {len(object_cols)} categorical columns: {object_cols}."
+    if skipped:
+        msg += (f" Not used as model inputs: {skipped} (dates, or text with over {MAX_AUTO_ONEHOT} values; "
+                "use Date parts, Group rare categories, or remove them).")
 
     return {"success": True, "message": msg}
+
+
+def time_order(df: pd.DataFrame, time_column: str) -> pd.Index:
+    """Row labels sorted by time (stable, so rows with the same time keep their order)."""
+    from app.expressions import as_dates
+    return as_dates(df[time_column]).sort_values(kind="stable").index
+
+
+def cv_splitter(session: DataSession, folds: int):
+    """Cross-validation folds: shuffled for ordinary data; for time data, always train on the past
+    and test on the following stretch (TimeSeriesSplit), never the other way round."""
+    if session.time_column:
+        from sklearn.model_selection import TimeSeriesSplit
+        return TimeSeriesSplit(n_splits=folds)
+    return folds
 
 
 @register_tool(
@@ -285,7 +339,7 @@ def auto_ml(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         try:
             # n_jobs=1: on a shared server, one person's search mustn't take every CPU core
             grid_search = GridSearchCV(clone(config["model"]), config["params"],
-                                       cv=folds, scoring=scoring, n_jobs=1, error_score="raise")
+                                       cv=cv_splitter(session, folds), scoring=scoring, n_jobs=1, error_score="raise")
             grid_search.fit(session.X_train, session.y_train)
         except Exception as e:
             results.append({"model": name, "error": str(e).splitlines()[0][:200]})

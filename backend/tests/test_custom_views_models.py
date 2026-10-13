@@ -41,6 +41,7 @@ VIEW_ARGS = {
     "group_summary": {"group_by": "plan", "value": "age", "aggregation": "median"},
     "pivot_table": {"rows": "plan", "columns": "churned", "value": "visits", "aggregation": "mean"},
     "preview_data": {"rows": 3, "position": "last"},
+    "plot_line": {"x": "visits", "y": ["age"]},
 }
 
 

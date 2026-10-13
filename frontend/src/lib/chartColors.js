@@ -11,6 +11,11 @@ export const SERIES = '#eb6834';
 export const GROUPS = ['#eb6834', '#2a78d6', '#1baf7a'];
 export const OTHER = '#b5ada4';
 
+// Lines (one per company, per column): 8 categorical slots in fixed order, validated together
+// (lightness, chroma, color-blind separation all pass on white). Three sit under 3:1 contrast on
+// white, so line charts always show a legend. A 9th line is never invented: the backend shows 8.
+export const LINES = ['#eb6834', '#2a78d6', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
+
 // Chart chrome: quiet lines and labels so the data stands out
 export const GRID = '#efe9e2';
 export const AXIS = '#8a837b';

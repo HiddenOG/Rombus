@@ -35,13 +35,17 @@ def parse_test_size(value: Any) -> float:
             "description": f"Fraction of rows to lock away as the test set, "
                            f"{MIN_TEST_SIZE} to {MAX_TEST_SIZE} (default {DEFAULT_TEST_SIZE}).",
         },
+        "split": {"type": "string", "enum": ["random", "time"],
+                  "description": "random (default), or time: lock the MOST RECENT rows, for data over time "
+                                 "(prices, sales). A random split would let the model peek between days."},
+        "time_column": {"type": "string", "description": "For split=time: the date/time column that orders the rows."},
     },
     ["column"],
     before_split=True,
     kind="action",
 )
 def select_target(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Set the target column and lock away the test rows."""
+    """Set the target column and lock away the test rows (a random share, or the most recent ones)."""
     col = args.get("column")
     if not col:
         return {"success": False, "message": "Missing 'column' argument."}
@@ -49,28 +53,48 @@ def select_target(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     validate_column(session, col)
 
     test_size = parse_test_size(args.get("test_size", DEFAULT_TEST_SIZE))
+    split = args.get("split") or ("time" if args.get("time_column") else "random")
+    time_column = None
+    if split == "time":
+        from app.expressions import looks_like_dates
+        time_column = args.get("time_column")
+        if not time_column:
+            raise ValueError("A time split needs the date column that orders the rows (time_column).")
+        validate_column(session, time_column)
+        if time_column == col:
+            raise ValueError("The time column orders the rows; predict a different column.")
+        if not looks_like_dates(session.original_df[time_column]):
+            raise ValueError(f"'{time_column}' doesn't look like dates or times, so it can't order the rows.")
+    elif split != "random":
+        raise ValueError("Split must be 'random' or 'time'.")
 
-    previous = (session.target_column, session.problem_type)
-    session.target_column = col
+    previous = (session.target_column, session.problem_type, session.time_column)
+    session.target_column, session.time_column = col, time_column
     nunique = session.original_df[col].nunique()
     session.problem_type = "classification" if nunique < 20 else "regression"
     # Re-locking replays the existing recipe on the new training rows
     try:
         dropped = session.lock_test_rows(test_size)
     except ValueError as e:
-        session.target_column, session.problem_type = previous
+        session.target_column, session.problem_type, session.time_column = previous
         raise ValueError(f"Couldn't re-lock: the existing recipe doesn't fit the new split. {e}") from None
 
     if session.current_stage == "ACQUIRE":
         session.current_stage = "SCRUB"
 
+    which = f"the most recent {len(session.test_df)} rows by '{time_column}'" if time_column else f"{len(session.test_df)} rows"
     msg = (
         f"Target set to '{col}' ({session.problem_type}, {nunique} unique values). "
-        f"Locked away {len(session.test_df)} rows ({test_size:.0%}) as the final test set; "
+        f"Locked away {which} ({test_size:.0%}) as the final test set; "
         f"working with {len(session.df)} training rows."
     )
+    if time_column:
+        from app.expressions import as_dates
+        cutoff = as_dates(session.test_df[time_column]).min()
+        msg += (f" Time split: training rows are before {cutoff:%Y-%m-%d}, test rows from then on, so the model is "
+                "always tested on a future it hasn't seen.")
     if dropped:
-        msg += f" Removed {dropped} rows with a blank '{col}'."
+        msg += f" Removed {dropped} rows with a blank '{col}'" + (" or an unreadable date." if time_column else ".")
     if session.recipe:
         msg += f" Replayed {len(session.recipe)} recipe steps on the new training rows."
     if session.lock_count > 1:

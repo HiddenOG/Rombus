@@ -48,6 +48,19 @@ def _select_target(session, args):
     size = float(args.get("test_size") or session.test_size or 0.2)
     if size >= 1:
         size /= 100
+    time_column = args.get("time_column") if args.get("split", "time" if args.get("time_column") else "random") == "time" else None
+    if time_column:
+        return HEADER + _code(f'''
+df = pd.read_csv({session.filename!r})
+df = df.dropna(subset=[{target!r}])  # rows with no answer can't be learned from or graded
+
+# Time split: order the rows by {time_column!r}, then lock away the most recent {size:.0%} as the final
+# exam. The model learns from the past and is tested on a future it hasn't seen.
+times = pd.to_datetime(df[{time_column!r}], errors="coerce", format="mixed")
+df = df.loc[times[times.notna()].sort_values(kind="stable").index]  # rows without a readable date can't be placed
+n_test = max(1, int(np.ceil(len(df) * {size})))
+train, test = df.iloc[:-n_test], df.iloc[-n_test:]
+''')
     stratify = f"df[{target!r}]" if _stratifies(session, size) else "None"
     return HEADER + "from sklearn.model_selection import train_test_split\n\n" + _code(f'''
 df = pd.read_csv({session.filename!r})
@@ -101,10 +114,16 @@ result = train[mask]
 
 @builder("group_summary")
 def _group(session, args):
+    from app.tools.analysis import _value_columns
     by, value = args.get("group_by"), args.get("value")
     agg = args.get("aggregation") or ("mean" if value else "count")
-    line = (f"result = train.groupby({by!r}, dropna=False)[{value!r}].agg({agg!r}).sort_values(ascending=False)"
-            if value else f"result = train.groupby({by!r}, dropna=False).size().sort_values(ascending=False)")
+    values = _value_columns(session.df, value)
+    if len(values) > 1:
+        line = f"result = train.groupby({by!r}, sort=False)[{values!r}].agg({agg!r}).round(4)  # several columns at once"
+    elif value:
+        line = f"result = train.groupby({by!r}, dropna=False)[{values[0]!r}].agg({agg!r}).sort_values(ascending=False)"
+    else:
+        line = f"result = train.groupby({by!r}, dropna=False).size().sort_values(ascending=False)"
     return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + line + "\n# result.head(20).plot.bar()"
 
 
@@ -176,9 +195,35 @@ result = train.isna().mean().sort_values(ascending=False).round(3)  # share of b
 
 @builder("plot_correlation")
 def _correlation(session, args):
-    return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + _code('''
-result = train.select_dtypes(include="number").corr().round(2)  # -1 opposite … 0 unrelated … +1 together
+    method = "cov" if args.get("measure") == "covariance" else "corr"
+    note = "  # how pairs move together, in the data's own units" if method == "cov" else \
+        "  # -1 opposite … 0 unrelated … +1 together"
+    value, group, align = args.get("value"), args.get("group_by"), args.get("align_on")
+    if value and group and align:
+        return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + _code(f'''
+# One column per {group}, one row per {align}: then compare the columns
+wide = train.pivot_table(index={align!r}, columns={group!r}, values={value!r}, aggfunc="mean")
+result = wide.{method}().round(4){note}
 ''')
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + "\n" + _code(f'''
+result = train.select_dtypes(include="number").{method}().round(4){note}
+''')
+
+
+@builder("plot_line")
+def _line(session, args):
+    x, group = args.get("x"), args.get("group_by")
+    ys = args.get("y") or []
+    ys = [ys] if isinstance(ys, str) else list(ys)
+    if group:
+        body = f'''
+result = train.pivot_table(index={x!r}, columns={group!r}, values={ys[0] if ys else None!r})  # a column per {group}
+# result.plot()  # one line per {group}'''
+    else:
+        body = f'''
+result = train[{[x, *ys]!r}].set_index({x!r}).sort_index()
+# result.plot()  # one line per column'''
+    return HEADER + TRAIN_NOTE + VIEW_NOTE + _code(body)
 
 
 @builder("plot_scatterplot")
@@ -196,9 +241,15 @@ if len(result) > 500:
 def _features_block(target: str) -> str:
     return _code(f'''
 def model_features(df):
-    # All-numeric table for the model: leftover text columns are one-hot encoded, blanks become 0
+    # All-numeric table for the model: leftover text columns are one-hot encoded, blanks become 0.
+    # Dates (also dates stored as text), and text with over 100 different values (IDs), are left out.
     X = df.drop(columns=[{target!r}], errors="ignore")
-    text = [c for c in X.columns if not pd.api.types.is_numeric_dtype(X[c])]
+    X = X.drop(columns=[c for c in X.columns if pd.api.types.is_datetime64_any_dtype(X[c])])
+    text = [c for c in X.columns if not pd.api.types.is_numeric_dtype(X[c]) and not pd.api.types.is_bool_dtype(X[c])]
+    looks_like_dates = lambda s: len(s.dropna()) > 0 and pd.to_datetime(
+        s.dropna().head(500), errors="coerce", format="mixed").notna().mean() >= 0.8
+    X = X.drop(columns=[c for c in text if (len(X) > 1 and looks_like_dates(X[c])) or X[c].nunique() > 100])
+    text = [c for c in text if c in X.columns]
     return pd.get_dummies(X, columns=text, dtype=int).fillna(0)
 ''')
 
@@ -358,7 +409,7 @@ def action_code(session: DataSession, tool: str, args: Dict[str, Any]) -> str:
 
 VIEW_TOOLS = {"preview_data", "get_data_info", "check_duplicates", "plot_histogram", "plot_boxplot",
               "plot_correlation", "plot_scatterplot", "show_unique_values", "plot_missing",
-              "filter_rows", "group_summary", "pivot_table"}
+              "filter_rows", "group_summary", "pivot_table", "plot_line"}
 
 # The referee: their code is shown but can't be edited, or their guarantees would mean nothing
 PROTECTED = {

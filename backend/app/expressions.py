@@ -11,10 +11,41 @@ Each can also be written out as plain pandas code (for the code tab and the expo
 
 import ast
 import re
-from typing import Any, Callable, Dict, List, Tuple
+import warnings
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+
+# ── Dates ────────────────────────────────────────────────────────────────────────
+
+def as_dates(series: pd.Series) -> pd.Series:
+    """A column read as dates: real dates as they are, text like "2020-03-16" parsed, anything else blank.
+    Plain numbers aren't treated as dates (a column of years or prices isn't a date column)."""
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return series
+    if pd.api.types.is_numeric_dtype(series) or pd.api.types.is_bool_dtype(series):
+        return pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # "could not infer format" notes for mixed text
+        return pd.to_datetime(series, errors="coerce", format="mixed")
+
+
+def looks_like_dates(series: pd.Series, share: float = 0.8) -> bool:
+    """Whether most of a column's filled values read as dates."""
+    filled = series.dropna()
+    return bool(len(filled)) and as_dates(filled.head(500)).notna().mean() >= share
+
+
+def _date_value(text: str) -> Optional[pd.Timestamp]:
+    text = text.strip().strip("'\"")
+    if not re.search(r"\d{4}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", text):
+        return None  # needs something date-shaped: a 4-digit year or d/m/y
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        value = pd.to_datetime(text, errors="coerce")
+    return None if pd.isna(value) else value
 
 # ── Conditions ───────────────────────────────────────────────────────────────────
 
@@ -54,9 +85,17 @@ def _split_condition(df: pd.DataFrame, text: str) -> Tuple[str, str, str]:
     op = next((o for o in OPERATORS if rest.lower().startswith(o)), None)
     if op is None:
         raise ValueError(f"In '{text}': use one of > >= < <= == != contains, or 'is blank' / 'is not blank'.")
-    if op in (">", ">=", "<", "<=") and not pd.api.types.is_numeric_dtype(df[col]):
-        raise ValueError(f"'{col}' holds text, so it can't be compared with {op}. Use == or contains.")
-    return col, op, rest[len(op):].strip()
+    value_text = rest[len(op):].strip()
+    if op in (">", ">=", "<", "<=") and not pd.api.types.is_numeric_dtype(df[col]) and not _is_date_comparison(df[col], value_text):
+        raise ValueError(f"'{col}' holds text, so it can't be compared with {op}. Use == or contains "
+                         "(dates can be compared, like Date >= 2020-01-01).")
+    return col, op, value_text
+
+
+def _is_date_comparison(series: pd.Series, value_text: str) -> bool:
+    """`Date >= 2020-01-01`: a date-like column against a date-like value."""
+    return _date_value(value_text) is not None and (
+        pd.api.types.is_datetime64_any_dtype(series) or looks_like_dates(series))
 
 
 def _condition(df: pd.DataFrame, text: str) -> Tuple[pd.Series, str]:
@@ -82,7 +121,10 @@ def _simple_condition(df: pd.DataFrame, text: str) -> Tuple[pd.Series, str]:
         needle = _parse_value(value_text, pd.Series(dtype=str))
         hit = series.astype(str).str.contains(needle, case=False, regex=False) & series.notna()
         return (~hit if op.startswith("not") else hit), f"{col} {op} {value_text}"
-    value = _parse_value(value_text, series)
+    if op not in ("contains", "not contains") and _is_date_comparison(series, value_text):
+        series, value = as_dates(series), _date_value(value_text)  # compare as dates, not as text
+    else:
+        value = _parse_value(value_text, series)
     compare = {">=": series.ge, "<=": series.le, ">": series.gt, "<": series.lt,
                "==": series.eq, "=": series.eq, "!=": series.ne}[op]
     return compare(value).fillna(False).astype(bool), f"{col} {op} {value_text}"
@@ -121,6 +163,10 @@ def filter_code(df: pd.DataFrame, text: str, frame: str = "df") -> str:
             return f"({formula_code(piece, df.columns, frame)} == 1)"
         col, op, value_text = _split_condition(df, piece)
         ref = f"{frame}[{col!r}]"
+        if op not in ("contains", "not contains") and not op.startswith("is") and _is_date_comparison(df[col], value_text):
+            date = str(_date_value(value_text))  # e.g. "2020-01-01 00:00:00": exactly the value the app compares
+            return (f"(pd.to_datetime({ref}, errors='coerce', format='mixed') {'==' if op == '=' else op} "
+                    f"pd.Timestamp({date!r}))")
         if op.startswith("is not"):
             return f"{ref}.notna()"
         if op.startswith("is "):

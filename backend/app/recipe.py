@@ -39,6 +39,7 @@ def step_type(name: str):
 class Context:
     """What every step may know about the session besides the data itself."""
     target: Optional[str] = None
+    time_column: Optional[str] = None  # time mode: the column that orders the rows
 
 
 class Step:
@@ -315,9 +316,9 @@ class DropRowsWhere(Step):
 
 @step_type("change_type")
 class ChangeType(Step):
-    """astype: number (decimal), whole number, or text. Values that can't convert become blanks."""
+    """astype: number (decimal), whole number, text, or date. Values that can't convert become blanks."""
     kind = "fixed"
-    TYPES = ("number", "whole number", "text")
+    TYPES = ("number", "whole number", "text", "date")
 
     def learn(self, train):
         self._require_column(train, self.args.get("column"))
@@ -332,6 +333,9 @@ class ChangeType(Step):
         if col in df.columns:
             if to == "text":
                 df[col] = df[col].astype(str).where(df[col].notna())
+            elif to == "date":
+                from app.expressions import as_dates
+                df[col] = as_dates(df[col])
             else:
                 values = pd.to_numeric(df[col], errors="coerce")
                 df[col] = values.round().astype("Int64") if to == "whole number" else values.astype(float)
@@ -626,6 +630,171 @@ class SplitColumn(Step):
         names = self._names()
         filled = ", ".join(f"{n} ({int(after[n].notna().sum())} filled)" for n in names)
         return f"Split '{self.args['column']}' on {self.args.get('separator') or ','!r} into {filled}. The original column is kept."
+
+
+# ── Dates and time ───────────────────────────────────────────────────────────────
+
+DATE_PARTS = {
+    "year": lambda d: d.dt.year, "month": lambda d: d.dt.month, "day": lambda d: d.dt.day,
+    "weekday": lambda d: d.dt.dayofweek, "weekday name": lambda d: d.dt.day_name(),
+    "quarter": lambda d: d.dt.quarter, "week": lambda d: d.dt.isocalendar().week.astype("Int64"),
+    "day of year": lambda d: d.dt.dayofyear, "hour": lambda d: d.dt.hour,
+}
+
+
+@step_type("date_parts")
+class DateParts(Step):
+    """A date column into parts a model can use: year, month, weekday (0 = Monday) ... Row by row."""
+    kind = "fixed"
+
+    def _parts(self) -> List[str]:
+        parts = self.args.get("parts") or ["year", "month", "weekday"]
+        unknown = [p for p in parts if p not in DATE_PARTS]
+        if unknown:
+            raise ValueError(f"Unknown date parts {unknown}. Use: {', '.join(DATE_PARTS)}.")
+        return parts
+
+    def learn(self, train):
+        from app.expressions import looks_like_dates
+        col = self._require_column(train, self.args.get("column"))
+        if not looks_like_dates(train[col]):
+            raise ValueError(f"'{col}' doesn't look like dates.")
+        clash = [f"{col}_{p.replace(' ', '_')}" for p in self._parts() if f"{col}_{p.replace(' ', '_')}" in train.columns]
+        if clash:
+            raise ValueError(f"There are already columns called {', '.join(clash)}.")
+        return {}
+
+    def apply(self, df, learned):
+        from app.expressions import as_dates
+        col = self.args["column"]
+        if col in df.columns:
+            dates = as_dates(df[col])
+            for part in self._parts():
+                df[f"{col}_{part.replace(' ', '_')}"] = DATE_PARTS[part](dates)
+        return df
+
+    def summary(self, before, after, learned):
+        col = self.args["column"]
+        made = [f"{col}_{p.replace(' ', '_')}" for p in self._parts()]
+        unreadable = int(after[made[0]].isna().sum() - before[col].isna().sum())
+        msg = f"From '{col}' made {', '.join(made)}."
+        if unreadable > 0:
+            msg += f" {unreadable} values weren't readable dates, so their parts are blank."
+        return msg + " (The date column itself isn't a model input; its parts are.)"
+
+
+TIME_KINDS = ("change %", "difference", "previous value", "moving average")
+
+
+@step_type("time_feature")
+class TimeFeature(Step):
+    """Compare each row with earlier rows of the same group, in time order: change % (returns),
+    difference, previous value, moving average. Never looks ahead.
+
+    Two honesty rules:
+      - for the TARGET column, only earlier rows are used (today's price would be the answer itself)
+      - learned: the last rows of each group from the training rows. Test rows come right after the
+        training rows in time, so their first moving average needs that history (it's all past)
+    """
+    kind = "learn"
+
+    def _settings(self, df):
+        col = self._require_column(df, self.args.get("column"))
+        order = self.args.get("order_by") or self.ctx.time_column
+        if not order:
+            raise ValueError("Say which date column orders the rows (order_by), or lock the test rows by time.")
+        self._require_column(df, order, "order_by")
+        group = self.args.get("group_by")
+        if group:
+            self._require_column(df, group, "group_by")
+        kind = self.args.get("kind") or "change %"
+        if kind not in TIME_KINDS:
+            raise ValueError(f"Kind must be one of: {', '.join(TIME_KINDS)}.")
+        try:
+            window = int(self.args.get("window") or (1 if kind != "moving average" else 7))
+        except (TypeError, ValueError):
+            raise ValueError("'window' must be a whole number of rows.")
+        if not 1 <= window <= 365:
+            raise ValueError("'window' must be between 1 and 365 rows.")
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            raise ValueError(f"'{col}' holds text; time features need numbers.")
+        return col, order, group, kind, window
+
+    def _name(self, col, kind, window):
+        given = (self.args.get("name") or "").strip()
+        short = {"change %": "change_pct", "difference": "diff", "previous value": "prev", "moving average": "ma"}[kind]
+        return given or f"{col}_{short}_{window}"
+
+    def learn(self, train):
+        from app.expressions import as_dates
+        col, order, group, kind, window = self._settings(train)
+        name = self._name(col, kind, window)
+        if name in train.columns:
+            raise ValueError(f"There's already a column called '{name}'.")
+        keep = window + 1  # enough earlier rows for the first later row, with the target's extra step back
+        rows = train.assign(_t=as_dates(train[order]))
+        rows = rows[rows["_t"].notna()].sort_values("_t", kind="stable")
+        groups = rows.groupby(rows[group].astype(str)) if group else [("all", rows)]
+        history = {str(g): [[str(t), None if pd.isna(v) else float(v)] for t, v in zip(part["_t"].tail(keep), part[col].tail(keep))]
+                   for g, part in groups}
+        return {"history": history}
+
+    def apply(self, df, learned):
+        from app.expressions import as_dates
+        col = self.args["column"]
+        _, order, group, kind, window = self._settings_lenient(df)
+        name = self._name(col, kind, window)
+        if col not in df.columns or order not in df.columns:
+            df[name] = np.nan  # e.g. a new customer without the history columns: no value to give
+            return df
+        rows = pd.DataFrame({"_t": as_dates(df[order]), "_g": df[group].astype(str) if group else "all",
+                             "_v": df[col].astype(float), "_row": np.arange(len(df))})
+        seen = set(zip(rows["_g"], rows["_t"]))
+        past = [(g, pd.Timestamp(t), v) for g, items in learned["history"].items() for t, v in items
+                if (g, pd.Timestamp(t)) not in seen]  # history the rows don't already contain
+        if past:
+            hist = pd.DataFrame(past, columns=["_g", "_t", "_v"]).assign(_row=-1)
+            rows = pd.concat([hist, rows], ignore_index=True)
+        rows = rows.sort_values(["_g", "_t"], kind="stable")
+        values = rows.groupby("_g")["_v"]
+        base = values.shift(1) if col == self.ctx.target else rows["_v"]  # the target: earlier rows only
+        base_by_group = base.groupby(rows["_g"])
+        if kind == "change %":
+            before = base_by_group.shift(window)
+            result = (base - before) / before.replace(0, np.nan) * 100
+        elif kind == "difference":
+            result = base - base_by_group.shift(window)
+        elif kind == "previous value":
+            result = base_by_group.shift(window)
+        else:
+            result = base_by_group.transform(lambda v: v.rolling(window, min_periods=window).mean())
+        result = result.where(rows["_t"].notna())  # a row with no readable date can't be placed in time
+        out = pd.Series(np.nan, index=range(len(df)))
+        mine = rows["_row"] >= 0
+        out.iloc[rows.loc[mine, "_row"].to_numpy()] = result[mine].to_numpy()
+        df[name] = out.to_numpy()
+        return df
+
+    def _settings_lenient(self, df):
+        """Settings without requiring every column (prediction rows may lack some)."""
+        order = self.args.get("order_by") or self.ctx.time_column
+        kind = self.args.get("kind") or "change %"
+        window = int(self.args.get("window") or (1 if kind != "moving average" else 7))
+        return self.args["column"], order, self.args.get("group_by"), kind, window
+
+    def summary(self, before, after, learned):
+        col, order, group, kind, window = self._settings_lenient(before)
+        name = self._name(col, kind, window)
+        what = {"change %": f"% change over {window} row(s)", "difference": f"difference over {window} row(s)",
+                "previous value": f"value {window} row(s) earlier", "moving average": f"{window}-row moving average"}[kind]
+        msg = f"Added '{name}': {col}'s {what}, in order of '{order}'" + (f", within each '{group}'" if group else "") + "."
+        if col == self.ctx.target:
+            msg += f" '{col}' is what you predict, so this uses only EARLIER rows (never the row's own answer)."
+        blanks = int(after[name].isna().sum())
+        if blanks:
+            where = f"the earliest rows of each '{group}'" if group else "the earliest rows"
+            msg += f" {blanks} values are blank: {where} have no earlier rows to use."
+        return msg
 
 
 @step_type("group_rare_categories")

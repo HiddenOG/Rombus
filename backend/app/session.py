@@ -71,12 +71,15 @@ class DataSession:
         # Clean-only mode: no target and no model, so no test rows to protect. Steps work on ALL rows.
         # Choosing a target later locks test rows from the original data and replays the recipe.
         self.clean_only = False
+        # Time mode: rows are ordered by this column and the test rows are the LATEST ones, so a model
+        # is always tested on a future it hasn't seen (a random split would let it peek between days)
+        self.time_column: Optional[str] = None
         self.created_at = time.time()
         self.updated_at = time.time()
 
     @property
     def ctx(self) -> Context:
-        return Context(target=self.target_column)
+        return Context(target=self.target_column, time_column=self.time_column)
 
     # ── Recipe changes ──────────────────────────────────────────────────────────
     # Every change goes through _set_recipe: replay on a scratch copy first, and keep the
@@ -303,17 +306,27 @@ class DataSession:
         from sklearn.model_selection import train_test_split
 
         full = whole_number_target(self.original_df.dropna(subset=[self.target_column]), self.target_column)
+
+        if self.time_column:
+            # Time mode: oldest rows train, the most recent share is locked away as the test set.
+            # Rows whose time can't be read can't be placed in time, so they're left out (and counted).
+            from app.expressions import as_dates
+            times = as_dates(full[self.time_column])
+            full = full.loc[times[times.notna()].sort_values(kind="stable").index]
+            n_test = max(1, int(np.ceil(len(full) * test_size)))
+            if n_test >= len(full):
+                raise ValueError("Too few rows with a readable date to set some aside.")
+            train, test = full.iloc[:-n_test], full.iloc[-n_test:]
+        else:
+            y = full[self.target_column]
+            stratify = None
+            if self.problem_type == "classification":
+                counts = y.value_counts()
+                n_test = int(np.ceil(len(full) * test_size))
+                if counts.min() >= 2 and n_test >= len(counts):
+                    stratify = y
+            train, test = train_test_split(full, test_size=test_size, random_state=42, stratify=stratify)
         dropped = len(self.original_df) - len(full)
-        y = full[self.target_column]
-
-        stratify = None
-        if self.problem_type == "classification":
-            counts = y.value_counts()
-            n_test = int(np.ceil(len(full) * test_size))
-            if counts.min() >= 2 and n_test >= len(counts):
-                stratify = y
-
-        train, test = train_test_split(full, test_size=test_size, random_state=42, stratify=stratify)
         self.raw_train = train.reset_index(drop=True)
         self.df = self.raw_train.copy()
         self.test_df = test.reset_index(drop=True)
@@ -366,6 +379,7 @@ class DataSession:
             "has_split": self.X_train is not None,
             "is_split": self.is_split,
             "clean_only": self.clean_only,
+            "time_column": self.time_column,
             "test_rows": len(self.test_df) if self.is_split else 0,
             "test_size": self.test_size,
             "lock_count": self.lock_count,
@@ -492,6 +506,7 @@ class SessionManager:
             "exam_count": session.exam_count,
             "owner": session.owner,
             "clean_only": int(session.clean_only),
+            "time_column": session.time_column,
         })
 
     def _load_session(self, session_id: str) -> Optional[DataSession]:
@@ -517,6 +532,7 @@ class SessionManager:
             session.cells = json.loads(row["cells"] or "[]")
             session.exam_count = row["exam_count"] or 0
             session.owner = row["owner"]
+            session.time_column = row.get("time_column")
             lines = [Line(s["tool"], s["args"], **({"id": s["id"]} if "id" in s else {}))
                      for s in json.loads(row["recipe"] or "[]")]
 

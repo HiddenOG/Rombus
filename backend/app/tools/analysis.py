@@ -56,7 +56,8 @@ def filter_rows(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     "group_summary",
     "Group the training rows by a column and summarise another per group, like df.groupby(...).agg(...).",
     {"group_by": COLUMN,
-     "value": {"type": "string", "description": "Column to summarise (leave out to count rows per group)."},
+     "value": {"type": "string",
+               "description": "Column(s) to summarise, comma-separated for several (leave out to count rows per group)."},
      "aggregation": {"type": "string", "enum": AGGREGATIONS}},
     ["group_by"],
 )
@@ -66,6 +67,9 @@ def group_summary(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     validate_column(session, by)
     if agg not in AGGREGATIONS:
         raise ValueError(f"Unknown aggregation '{agg}'. Use one of: {', '.join(AGGREGATIONS)}.")
+    values = _value_columns(df, value)
+    if len(values) > 1:
+        return _group_several(session, by, values, agg)
     if value:
         validate_column(session, value)
         if agg not in ("count",) and not pd.api.types.is_numeric_dtype(df[value]):
@@ -92,6 +96,34 @@ def group_summary(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
             "title": f"{label.capitalize()} by {by}" + (" (top 20)" if groups > 20 else ""),
             "preview": shown.astype(object).where(shown.notna(), None).to_dict(orient="records"),
         },
+    }
+
+
+def _value_columns(df: pd.DataFrame, value: Any) -> List[str]:
+    """One column, or several: a list, or comma-separated names (a single name with a comma still works)."""
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value]
+    if value in df.columns:
+        return [value]
+    return [v.strip() for v in str(value).split(",") if v.strip()]
+
+
+def _group_several(session: DataSession, by: str, values: List[str], agg: str) -> Dict[str, Any]:
+    """Several columns summarised per group in one table, like df.groupby(by)[[a, b, c]].mean()."""
+    df = session.df
+    for v in values:
+        validate_column(session, v)
+    text = [v for v in values if not pd.api.types.is_numeric_dtype(df[v])]
+    if text and agg != "count":
+        raise ValueError(f"{text} hold text, so their {agg} can't be taken. Use count, or numeric columns.")
+    table = df.groupby(df[by].astype(str).where(df[by].notna(), "(blank)"), sort=False)[values].agg(agg).round(4)
+    table = table.rename(columns={v: f"{agg} of {v}" for v in values})
+    return {
+        "success": True,
+        "message": f"{agg.capitalize()} of {len(values)} columns for each of {len(table)} '{by}' groups.",
+        "evidence": {"preview": _table(table.reset_index())},
     }
 
 

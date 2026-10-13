@@ -48,6 +48,16 @@ def pipeline_script(session: DataSession) -> str:
     target, size = session.target_column, session.test_size or 0.2
     stratify = f"df[{target!r}]" if _stratifies(session, size) else "None"
     steps = session.recipe
+    if session.time_column:
+        tc = session.time_column
+        split_code = (
+            f"    # Time split: oldest rows train, the most recent {size:.0%} are the test rows\n"
+            f"    times = pd.to_datetime(df[{tc!r}], errors='coerce', format='mixed')\n"
+            f"    df = df.loc[times[times.notna()].sort_values(kind='stable').index]\n"
+            f"    n_test = max(1, int(np.ceil(len(df) * {size})))\n"
+            f"    train, test = df.iloc[:-n_test], df.iloc[-n_test:]")
+    else:
+        split_code = f"    train, test = train_test_split(df, test_size={size}, random_state=42, stratify={stratify})"
 
     parts = [f'''"""Data-cleaning pipeline exported from Rhombus.
 
@@ -113,7 +123,7 @@ def main(path={session.filename!r}):
     df = df.dropna(subset=[{target!r}])
     if df[{target!r}].dtype.kind == "f" and (df[{target!r}] == df[{target!r}].round()).all():
         df[{target!r}] = df[{target!r}].astype("int64")  # 0.0/1.0 back to 0/1 once the blanks are gone
-    train, test = train_test_split(df, test_size={size}, random_state=42, stratify={stratify})
+{split_code}
     train, test = train.reset_index(drop=True), test.reset_index(drop=True)
 
     train_clean, notes = fit_recipe(train)

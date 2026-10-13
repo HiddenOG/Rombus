@@ -116,6 +116,7 @@ ON_REQUEST = {
     "strip_characters": r"strip\w*|remov\w*|clean\w*|trim\w*|charact\w*|symbol|punctuat\w*|underscore|slash|dot",
     "format_text": r"format\w*|phone|number|digit|pattern|layout|standardi[sz]\w*|clean\w*",
     "split_column": r"split\w*|separat\w*|break\w*|divid\w*|into|address",
+    "time_feature": r"return|change|pct|percent|moving|rolling|average|lag|previous|differen|trend|sma|ma\b",
 }
 
 

@@ -1,9 +1,9 @@
 import React from 'react';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-    ScatterChart, Scatter, Legend,
+    ScatterChart, Scatter, Legend, LineChart, Line,
 } from 'recharts';
-import { SERIES, GROUPS, OTHER, GRID, AXIS, tooltipStyle } from '../lib/chartColors';
+import { SERIES, GROUPS, OTHER, LINES, GRID, AXIS, tooltipStyle } from '../lib/chartColors';
 
 const axisTick = { fontSize: 11, fill: AXIS };
 
@@ -33,6 +33,8 @@ export function ChartRenderer({ evidence }) {
             return <ScatterCard data={evidence.chart_data} x={evidence.x} y={evidence.y} hue={evidence.hue} title={evidence.title} />;
         case 'missing_map':
             return <MissingMapCard evidence={evidence} />;
+        case 'line':
+            return <LineCard evidence={evidence} />;
         default:
             return null;
     }
@@ -253,6 +255,61 @@ function MissingMapCard({ evidence }) {
                     </div>
                 </div>
             </div>
+        </ChartCard>
+    );
+}
+
+const dateTick = (ms) => new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short' });
+const dateFull = (ms) => new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+const numberText = (v) => (Math.abs(v) >= 1000 ? v.toLocaleString(undefined, { maximumFractionDigits: 0 }) : +v.toFixed(3));
+
+/** Lines over x (dates or numbers): one per group or per column, 2px, no dots, crosshair tooltip. */
+function LineCard({ evidence }) {
+    const { series = [], x_is_date: isDate, x, y_label: yLabel, title } = evidence;
+    if (!series.length) return null;
+    const lines = series.map(s => ({ name: s.name, data: s.points.map(([px, py]) => ({ x: px, y: py })) }));
+    const format = isDate ? dateTick : numberText;
+
+    return (
+        <ChartCard title={title}>
+            <ResponsiveContainer width="100%" height={300}>
+                <LineChart margin={{ top: 4, right: 12, left: 0, bottom: 4 }}>
+                    <CartesianGrid vertical={false} stroke={GRID} />
+                    <XAxis
+                        dataKey="x"
+                        type="number"
+                        domain={['dataMin', 'dataMax']}
+                        tickFormatter={format}
+                        tick={axisTick}
+                        tickLine={false}
+                        axisLine={{ stroke: GRID }}
+                        minTickGap={40}
+                        allowDuplicatedCategory={false}
+                        name={x}
+                    />
+                    <YAxis tick={axisTick} tickLine={false} axisLine={false} tickFormatter={numberText} width={56} name={yLabel} />
+                    <Tooltip
+                        contentStyle={tooltipStyle}
+                        labelFormatter={v => (isDate ? dateFull(v) : numberText(v))}
+                        formatter={(v, name) => [numberText(v), name]}
+                        cursor={{ stroke: AXIS, strokeDasharray: '3 3' }}
+                    />
+                    <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, color: '#57534e' }} />
+                    {lines.map((line, i) => (
+                        <Line
+                            key={line.name}
+                            data={line.data}
+                            dataKey="y"
+                            name={line.name}
+                            stroke={LINES[i % LINES.length]}
+                            strokeWidth={2}
+                            dot={false}
+                            activeDot={{ r: 4, strokeWidth: 2, stroke: '#ffffff' }}
+                            isAnimationActive={false}
+                        />
+                    ))}
+                </LineChart>
+            </ResponsiveContainer>
         </ChartCard>
     );
 }

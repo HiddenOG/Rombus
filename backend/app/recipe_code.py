@@ -122,6 +122,7 @@ def _change_type(args, target):
     col, to = args.get("column"), args.get("to")
     line = {
         "text": f"df[{col!r}] = df[{col!r}].astype(str).where(df[{col!r}].notna())  # keep blanks blank",
+        "date": f"df[{col!r}] = pd.to_datetime(df[{col!r}], errors='coerce', format='mixed')  # unreadable: blank",
         "whole number": f"df[{col!r}] = pd.to_numeric(df[{col!r}], errors='coerce').round().astype('Int64')",
     }.get(to, f"df[{col!r}] = pd.to_numeric(df[{col!r}], errors='coerce')  # unconvertible values become blanks")
     return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
@@ -236,6 +237,80 @@ def apply(df, learned):
         piece = parts[i] if i in parts.columns else pd.Series(np.nan, index=df.index)
         df[name] = piece.str.strip().replace("", np.nan)
     return df  # the original column is kept
+''')
+
+
+@builder("date_parts")
+def _date_parts(args, target):
+    col = args.get("column")
+    parts = args.get("parts") or ["year", "month", "weekday"]
+    code = {
+        "year": "dates.dt.year", "month": "dates.dt.month", "day": "dates.dt.day",
+        "weekday": "dates.dt.dayofweek  # 0 = Monday", "weekday name": "dates.dt.day_name()",
+        "quarter": "dates.dt.quarter", "week": 'dates.dt.isocalendar().week.astype("Int64")',
+        "day of year": "dates.dt.dayofyear", "hour": "dates.dt.hour",
+    }
+    lines = "\n".join(f"    df[{col + '_' + p.replace(' ', '_')!r}] = {code[p]}" for p in parts)
+    return _code(NOTHING_TO_LEARN) + "\n\n\n" + _code(f'''
+def apply(df, learned):
+    dates = pd.to_datetime(df[{col!r}], errors="coerce", format="mixed")  # unreadable dates become blanks
+''') + "\n" + lines + "\n    return df"
+
+
+@builder("time_feature")
+def _time_feature(args, target):
+    col = args.get("column")
+    columns = args.get("_columns")
+    order = args.get("order_by")  # always set: the tool fills in the notebook's time column when adding the step
+    group = args.get("group_by")
+    kind = args.get("kind") or "change %"
+    window = int(args.get("window") or (1 if kind != "moving average" else 7))
+    short = {"change %": "change_pct", "difference": "diff", "previous value": "prev", "moving average": "ma"}[kind]
+    name = (args.get("name") or "").strip() or f"{col}_{short}_{window}"
+    groups = f"df[{group!r}].astype(str)" if group else '"all"'
+    group_of = f"rows[{group!r}].astype(str)" if group else 'pd.Series("all", index=rows.index)'
+    base = ('values.shift(1)  # what you predict: earlier rows only, never the row\'s own answer'
+            if col == target else 'rows["_v"]')
+    formula = {
+        "change %": f'before = base_by_group.shift({window})\n    result = (base - before) / before.replace(0, np.nan) * 100',
+        "difference": f"result = base - base_by_group.shift({window})",
+        "previous value": f"result = base_by_group.shift({window})",
+        "moving average": f"result = base_by_group.transform(lambda v: v.rolling({window}, min_periods={window}).mean())",
+    }[kind]
+    return _code(f'''
+def learn(train):
+    # Remember the last {window + 1} training rows of each group: the first test rows come right after
+    # them in time and need them as history (all past, so nothing leaks)
+    rows = train.assign(_t=pd.to_datetime(train[{order!r}], errors="coerce", format="mixed"))
+    rows = rows[rows["_t"].notna()].sort_values("_t", kind="stable")
+    parts = rows.groupby({group_of}) if {bool(group)!r} else [("all", rows)]
+    return {{"history": {{str(g): [[str(t), None if pd.isna(v) else float(v)]
+                               for t, v in zip(p["_t"].tail({window + 1}), p[{col!r}].tail({window + 1}))]
+                         for g, p in parts}}}}
+
+
+def apply(df, learned):
+    if {col!r} not in df.columns or {order!r} not in df.columns:
+        df[{name!r}] = np.nan
+        return df
+    rows = pd.DataFrame({{"_t": pd.to_datetime(df[{order!r}], errors="coerce", format="mixed"),
+                         "_g": {groups}, "_v": df[{col!r}].astype(float), "_row": np.arange(len(df))}})
+    seen = set(zip(rows["_g"], rows["_t"]))
+    past = [(g, pd.Timestamp(t), v) for g, items in learned["history"].items() for t, v in items
+            if (g, pd.Timestamp(t)) not in seen]
+    if past:
+        rows = pd.concat([pd.DataFrame(past, columns=["_g", "_t", "_v"]).assign(_row=-1), rows], ignore_index=True)
+    rows = rows.sort_values(["_g", "_t"], kind="stable")
+    values = rows.groupby("_g")["_v"]
+    base = {base}
+    base_by_group = base.groupby(rows["_g"])
+    {formula}
+    result = result.where(rows["_t"].notna())
+    out = pd.Series(np.nan, index=range(len(df)))
+    mine = rows["_row"] >= 0
+    out.iloc[rows.loc[mine, "_row"].to_numpy()] = result[mine].to_numpy()
+    df[{name!r}] = out.to_numpy()  # {kind}, window {window}, in time order of {order!r}
+    return df
 ''')
 
 

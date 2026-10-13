@@ -78,9 +78,12 @@ async function apiRequest(endpoint, options = {}) {
     }
 }
 
-export async function uploadFile(file) {
+/** One file, or several (a FileList / array) to stack into one table with a source_file column. */
+export async function uploadFile(fileOrFiles) {
     const formData = new FormData();
-    formData.append('file', file);
+    const list = fileOrFiles instanceof File ? [fileOrFiles] : Array.from(fileOrFiles);
+    if (list.length === 1) formData.append('file', list[0]);
+    else list.forEach(f => formData.append('files', f));
     return apiRequest('/api/upload', { method: 'POST', body: formData });
 }
 

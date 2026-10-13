@@ -54,9 +54,11 @@ INSTRUCTIONS:
    price, price / total_sqft is not allowed as a feature.
 11. ONLY WHEN THE USER ASKS for that kind of change, suggest: remove_outliers, drop_rows_where,
    group_rare_categories, add_column, change_type, rename_column, fill_value, replace_values,
-   strip_characters, format_text, split_column. They are the user's
+   strip_characters, format_text, split_column, time_feature. They are the user's
    judgement calls (which rows to drop, which features to make). Unasked, don't suggest them; you may
    mention the idea in words if it would clearly help.
+12. Data over time (prices, sales by date): when choosing the target, suggest split="time" with the date
+   column, so the test rows are the most recent ones. A random split lets the model peek between days.
 """.strip()
 
 
@@ -65,12 +67,12 @@ INSTRUCTIONS:
 # People can still run any step themselves with "Add step".
 LOOK = ["preview_data", "get_data_info", "check_duplicates", "show_unique_values", "plot_missing",
         "filter_rows", "group_summary", "pivot_table",
-        "plot_histogram", "plot_boxplot", "plot_correlation", "plot_scatterplot"]
+        "plot_histogram", "plot_boxplot", "plot_correlation", "plot_scatterplot", "plot_line"]
 CLEAN = ["remove_columns", "remove_duplicates", "drop_missing_rows", "drop_rows_where", "clean_numeric_string",
          "standardize_text", "change_type", "rename_column", "fill_value", "impute_missing", "impute_all_missing",
          "encode_categorical", "encode_all_categorical", "scale_all_features", "log_transform", "add_column",
          "group_rare_categories", "remove_outliers", "replace_values", "strip_characters", "format_text",
-         "split_column"]
+         "split_column", "date_parts", "time_feature"]
 MODEL = ["train_models", "auto_ml", "final_exam", "predict", "explain_model", "save_model"]
 
 PHASE_TOOLS = {

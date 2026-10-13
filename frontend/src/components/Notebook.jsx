@@ -306,13 +306,14 @@ function EmptyState({ onUpload, isProcessing }) {
                     isProcessing ? 'cursor-wait opacity-70' : 'cursor-pointer hover:bg-brand-600'
                 }`}
             >
-                <Upload className="h-4 w-4" /> {isProcessing ? 'Uploading…' : 'Upload a CSV or Excel file'}
+                <Upload className="h-4 w-4" /> {isProcessing ? 'Uploading…' : 'Upload CSV or Excel files'}
                 <input
                     type="file"
+                    multiple
                     className="hidden"
                     accept=".csv,.xlsx,.xls"
                     disabled={isProcessing}
-                    onChange={e => e.target.files[0] && onUpload(e.target.files[0])}
+                    onChange={e => e.target.files.length && onUpload(e.target.files)}
                 />
             </label>
             <div className="mt-8 grid gap-3 text-left sm:mt-10 sm:grid-cols-3">

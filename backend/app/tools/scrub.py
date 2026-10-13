@@ -19,6 +19,9 @@ def recipe_tool(name: str, description: str, properties: Optional[Dict[str, Any]
                 required: Optional[List[str]] = None, ai: bool = True) -> None:
     """Register a tool that adds a step named `name` to the recipe."""
     def run(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
+        if name == "time_feature" and not args.get("order_by") and session.time_column:
+            # Write the ordering column into the step, so it replays the same way whatever happens later
+            args = {**args, "order_by": session.time_column}
         line = session.add_step(name, args)
         return {"success": True, "message": line.message, "step_id": line.id}
 
@@ -49,7 +52,7 @@ recipe_tool(
 recipe_tool(
     "change_type",
     "Convert a column's type, like astype: number, whole number or text (unconvertible values become blanks).",
-    {"column": COLUMN, "to": {"type": "string", "enum": ["number", "whole number", "text"]}},
+    {"column": COLUMN, "to": {"type": "string", "enum": ["number", "whole number", "text", "date"]}},
     ["column", "to"],
 )
 
@@ -99,6 +102,29 @@ recipe_tool(
     {"column": COLUMN, "into": {"type": "string", "description": "Names for the new parts, comma-separated: Street, State, Zip."},
      "separator": {"type": "string", "description": "What separates the parts (default a comma)."}},
     ["column", "into"],
+)
+
+recipe_tool(
+    "date_parts",
+    "Turn a date column into parts a model can use: year, month, day, weekday (0 = Monday), quarter, week...",
+    {"column": COLUMN,
+     "parts": {"type": "array", "items": {"type": "string", "enum": ["year", "month", "day", "weekday", "weekday name",
+                                                                     "quarter", "week", "day of year", "hour"]},
+               "description": "Which parts (default year, month, weekday)."}},
+    ["column"],
+)
+
+recipe_tool(
+    "time_feature",
+    "Compare each row with earlier rows of its group in time order: change % (daily returns), difference, "
+    "previous value (lag) or moving average. Never looks ahead.",
+    {"column": COLUMN,
+     "kind": {"type": "string", "enum": ["change %", "difference", "previous value", "moving average"]},
+     "window": {"type": "integer", "description": "How many rows back / how many rows to average (default 1, or 7 for averages)."},
+     "order_by": {"type": "string", "description": "Date column that orders the rows (default: the time split's column)."},
+     "group_by": {"type": "string", "description": "Optional: compute within each group of this column, e.g. company."},
+     "name": {"type": "string", "description": "Optional name for the new feature."}},
+    ["column"],
 )
 
 recipe_tool(

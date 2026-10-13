@@ -1,6 +1,13 @@
-"""Upload router — file upload endpoint."""
+"""Upload router — file upload endpoint.
+
+One file, or several stacked into one table (e.g. a CSV per stock ticker): rows of every file one
+after the other, with a `source_file` column saying where each row came from. Columns missing from
+a file are blank for its rows.
+"""
 
 import io
+import os
+from typing import List, Optional, Tuple
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -13,28 +20,55 @@ from app.session import session_manager
 router = APIRouter()
 
 ALLOWED = (".csv", ".xlsx", ".xls")
+MAX_FILES = 20
+SOURCE_COLUMN = "source_file"
 
 
 @router.post("/upload", dependencies=[Depends(limit("upload"))])
-async def upload_file(file: UploadFile = File(...), visitor: str = Depends(current_owner)):
-    """Upload a CSV or Excel file and create a new notebook owned by this visitor."""
-    name = file.filename or "uploaded_file.csv"
-    if not name.lower().endswith(ALLOWED):
-        raise HTTPException(status_code=400, detail="Please upload a .csv, .xlsx or .xls file.")
+async def upload_file(file: Optional[UploadFile] = File(None), files: Optional[List[UploadFile]] = File(None),
+                      visitor: str = Depends(current_owner)):
+    """Upload one CSV/Excel file, or several to stack into one table, as a new notebook."""
+    uploads = [f for f in ([file] if file else []) + (files or []) if f is not None]
+    if not uploads:
+        raise HTTPException(status_code=400, detail="Choose a file to upload.")
+    if len(uploads) > MAX_FILES:
+        raise HTTPException(status_code=400, detail=f"Upload at most {MAX_FILES} files at once.")
 
-    contents = await file.read()
-    if len(contents) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-        raise HTTPException(status_code=413, detail=f"File too large. Maximum size: {settings.MAX_UPLOAD_SIZE_MB} MB.")
-    # Reading the table and saving it to storage are slow: do them on a worker thread
-    return await run_in_threadpool(_create_notebook, contents, name, visitor)
+    read: List[Tuple[str, bytes]] = []
+    total = 0
+    for upload in uploads:
+        name = upload.filename or "uploaded_file.csv"
+        if not name.lower().endswith(ALLOWED):
+            raise HTTPException(status_code=400, detail=f"'{name}': please upload .csv, .xlsx or .xls files.")
+        contents = await upload.read()
+        total += len(contents)
+        if total > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+            raise HTTPException(status_code=413, detail=f"Files too large. Maximum in total: {settings.MAX_UPLOAD_SIZE_MB} MB.")
+        read.append((name, contents))
+    # Reading the tables and saving them to storage are slow: do them on a worker thread
+    return await run_in_threadpool(_create_notebook, read, visitor)
 
 
-def _create_notebook(contents: bytes, name: str, visitor: str):
+def _read_table(name: str, contents: bytes) -> pd.DataFrame:
     try:
-        df = pd.read_excel(io.BytesIO(contents)) if name.lower().endswith((".xlsx", ".xls")) else pd.read_csv(io.BytesIO(contents))
+        if name.lower().endswith((".xlsx", ".xls")):
+            return pd.read_excel(io.BytesIO(contents))
+        return pd.read_csv(io.BytesIO(contents))
     except Exception as e:
         reason = str(e).splitlines()[0][:200] if str(e) else type(e).__name__
-        raise HTTPException(status_code=400, detail=f"Couldn't read that file as a table: {reason}")
+        raise HTTPException(status_code=400, detail=f"Couldn't read '{name}' as a table: {reason}")
+
+
+def _create_notebook(read: List[Tuple[str, bytes]], visitor: str):
+    tables = [(name, _read_table(name, contents)) for name, contents in read]
+    if len(tables) == 1:
+        name, df = tables[0]
+    else:
+        stems = [os.path.splitext(n)[0] for n, _ in tables]
+        if any(SOURCE_COLUMN in t.columns for _, t in tables):
+            raise HTTPException(status_code=400, detail=f"A file already has a '{SOURCE_COLUMN}' column; rename it first.")
+        df = pd.concat([t.assign(**{SOURCE_COLUMN: s}) for s, (_, t) in zip(stems, tables)], ignore_index=True)
+        name = f"{stems[0]} + {len(tables) - 1} more.csv"
 
     if df.empty:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
@@ -50,4 +84,5 @@ def _create_notebook(contents: bytes, name: str, visitor: str):
         "session_id": session.session_id,
         "current_stage": session.current_stage,
         "summary": session.get_summary(),
+        "files": len(tables),
     }

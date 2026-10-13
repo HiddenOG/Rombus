@@ -144,17 +144,17 @@ function UploadCard({ onFileUpload, isProcessing }) {
                 <Upload className="w-5 h-5 text-brand-600" />
             </div>
             <p className="text-sm font-semibold text-ink">{isProcessing ? 'Uploading…' : 'Upload a dataset'}</p>
-            <p className="text-xs text-ink-3 mt-1">CSV or Excel, up to 50 MB</p>
+            <p className="text-xs text-ink-3 mt-1">CSV or Excel, up to 20 MB. Pick several to stack them into one table.</p>
             <span className="inline-block mt-4 rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-600">
-                Choose file
+                Choose files
             </span>
             <input
                 type="file"
+                multiple
                 className="hidden"
                 disabled={isProcessing}
                 onChange={(e) => {
-                    const file = e.target.files[0];
-                    if (file) onFileUpload(file);
+                    if (e.target.files.length) onFileUpload(e.target.files);
                 }}
                 accept=".csv,.xlsx,.xls"
             />

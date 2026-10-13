@@ -141,15 +141,20 @@ export function useNotebook() {
         }
     };
 
-    const upload = (file) => busy(async () => {
-        const data = await api.uploadFile(file);
+    // One file, or several (stacked into one table with a source_file column)
+    const upload = (files) => busy(async () => {
+        const list = files instanceof File ? [files] : Array.from(files);
+        const data = await api.uploadFile(list);
         setSessionId(data.session_id);
         setSummary(data.summary);
+        const what = list.length === 1
+            ? `**${list[0].name}**`
+            : `**${list.length} files** stacked into one table (the \`source_file\` column says which file each row came from)`;
         setCells([{
             id: newId(),
             type: 'note',
-            text: `Uploaded **${file.name}**: ${data.summary.shape[0]} rows × ${data.summary.shape[1]} columns. ` +
-                'Start by choosing the column to predict. Ask the copilot, or use **Add step → Select target**.',
+            text: `Uploaded ${what}: ${data.summary.shape[0]} rows × ${data.summary.shape[1]} columns. ` +
+                'Choose what to do: predict a column, or just clean the data.',
         }]);
         refreshNotebooks();
     });
