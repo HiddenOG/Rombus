@@ -56,6 +56,15 @@ Rules:
 - The test rows are locked away: you can't see or use them, and neither can the code.
 - If what they ask would leak information from the target or the test rows, say so and offer a safe version.
 - Short, readable code with brief comments.
+
+Follow on from the notebook's code, like a colleague continuing someone's notebook:
+- Reuse the names already used (variables, helper functions, new columns, keys in `learned`) for the
+  same things, and the same style. Don't invent a second name for something that already has one.
+- If they edited your earlier code, their version (shown in the notebook) is the one to follow.
+- Each cell starts fresh: a variable from an earlier LOOK cell doesn't exist in the next one. When you
+  need it again, recompute it with the same name and the same lines, so it reads as one notebook.
+- Rename only when they ask or a name has become misleading, and then say so (rename_column for a
+  column), so later cells and the recipe use the new name from then on.
 """.strip()
 
 LIBRARY_RULES = """
@@ -91,7 +100,7 @@ COLUMN_SETTINGS_FOR = {("plot_line", "y"), ("pivot_table", "columns"), ("pivot_t
 # Settings that take several columns comma-separated in one string
 COMMA_LISTS = {("group_summary", "value")}
 
-MAX_CELLS_IN_CONTEXT = 6
+HISTORY_TURNS = 8  # the last exchanges with the assistant, word for word (older ones live on in the notebook)
 
 
 def library(session: DataSession) -> List[str]:
@@ -220,16 +229,7 @@ def notebook_context(session: DataSession) -> str:
         mode = "not started: no target chosen yet, so only column names and types are known"
     columns = session.get_compact_column_summary() if session.can_explore else \
         "\n".join(f"{c} ({session.df[c].dtype})" for c in session.df.columns)
-    recent = []
-    for cell in session.cells[-MAX_CELLS_IN_CONTEXT:]:
-        if cell.get("type") == "ask":
-            recent.append(f"- asked: {str(cell.get('prompt'))[:200]}")
-        elif cell.get("type") == "code":
-            recent.append(f"- unrun {cell.get('kind', 'look')} cell:\n{str(cell.get('source', ''))[:600]}")
-        elif cell.get("type") == "run":
-            code = (cell.get("args") or {}).get("code")
-            line = f"- ran {cell.get('tool')}: {str(cell.get('message', ''))[:200]}"
-            recent.append(line + (f"\n{code[:600]}" if code else ""))
+    names = names_in_use(session)
     return f"""NOTEBOOK
 Dataset: {state['filename']} ({state['shape'][0]} rows x {state['shape'][1]} columns)
 Mode: {mode}
@@ -239,8 +239,93 @@ Recipe (in order): {recipe_lines(state['recipe'])}
 Columns:
 {columns}
 
-Latest cells:
-{chr(10).join(recent) or '- none yet'}"""
+What they've asked for so far (oldest first):
+{chr(10).join(f'- {r}' for r in past_requests(session)) or '- nothing yet'}
+
+Names already used in the notebook's code: {', '.join(names) or 'none yet'}
+
+The notebook so far, cell by cell (their edits included: this is the code as it is now):
+{notebook_code(session) or '(no cells yet)'}"""
+
+
+# ── Memory of the notebook: its code, names and requests ────────────────────────
+
+CODE_BUDGET = 12_000  # characters of past code shown in full; older cells beyond it are summarised
+MAX_REQUESTS = 20
+
+# Names every cell has anyway: not worth listing as "in use"
+GIVEN_NAMES = {"train", "df", "result", "learned", "models", "learn", "apply", "pd", "np", "plt", "sns",
+               "TRAIN_ONLY", "X_learn", "y_learn"}
+
+
+def _cell_code(cell: Dict[str, Any]) -> Optional[str]:
+    if cell.get("type") == "code":
+        return str(cell.get("source") or "")
+    if cell.get("type") == "run":
+        return (cell.get("args") or {}).get("code")
+    return None
+
+
+def notebook_code(session: DataSession) -> str:
+    """Every cell in order, numbered: code in full (newest first within the budget), built-in steps and
+    requests as one line each. Older code past the budget is summarised by the names it defines."""
+    entries, used = [], 0
+    for n, cell in reversed(list(enumerate(session.cells, 1))):
+        kind = cell.get("type")
+        code = _cell_code(cell)
+        if code is not None:
+            what = cell.get("kind") or {"custom_view": "look", "custom_code": "change",
+                                        "custom_models": "models"}.get(cell.get("tool"), "code")
+            state = "not run yet" if kind == "code" else "ran"
+            if used + len(code) <= CODE_BUDGET:
+                used += len(code)
+                entries.append(f"[{n}] {what} cell ({state}):\n```python\n{code.strip()}\n```")
+            else:
+                defined = ", ".join(_defined_names(code)) or "nothing named"
+                entries.append(f"[{n}] {what} cell ({state}), {len(code.splitlines())} lines; defines: {defined}")
+        elif kind == "run":
+            args = ", ".join(f"{k}={v}" for k, v in (cell.get("args") or {}).items())
+            entries.append(f"[{n}] built-in {cell.get('tool')}({args}): {str(cell.get('message', ''))[:160]}")
+        elif kind == "ask":
+            entries.append(f"[{n}] they asked: {str(cell.get('prompt'))[:200]}")
+    return "\n".join(reversed(entries))
+
+
+def _defined_names(code: str) -> List[str]:
+    """Variables, functions and new columns a piece of code defines (in order, no repeats)."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return []
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            found.append(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            found.append(node.id)
+        elif isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store) \
+                and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+            found.append(f'["{node.slice.value}"]')  # df["pps"] = ...: a column (or a key) it makes
+        elif isinstance(node, ast.Dict):  # the keys of what learn() returns
+            found += [f'"{k.value}"' for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)]
+    return [n for n in dict.fromkeys(found) if n not in GIVEN_NAMES and not n.startswith("_")]
+
+
+def names_in_use(session: DataSession) -> List[str]:
+    names: List[str] = []
+    for cell in session.cells:
+        code = _cell_code(cell)
+        if code:
+            names += _defined_names(code)
+    return list(dict.fromkeys(names))[:80]
+
+
+def past_requests(session: DataSession) -> List[str]:
+    """What the user asked the assistant for, oldest first (the notebook's ask cells, else memory)."""
+    asked = [str(c.get("prompt")) for c in session.cells if c.get("type") == "ask" and c.get("prompt")]
+    if not asked:
+        asked = [m["content"] for m in session.memory if m.get("role") == "user" and m.get("kind") == "assist"]
+    return [a[:200] for a in asked[-MAX_REQUESTS:]]
 
 
 # ── Talking to the AI providers (plain text: no tools) ───────────────────────────
@@ -469,8 +554,8 @@ async def assist(session: DataSession, message: str) -> Dict[str, Any]:
 
     A proposed built-in is checked before anyone sees it, and code is checked for syntax; either gets
     one retry, told exactly what was wrong."""
-    history = [{"role": m["role"], "content": m["content"]} for m in session.memory[-8:]
-               if m.get("role") in ("user", "assistant") and m.get("kind") == "assist"]
+    history = [{"role": m["role"], "content": m["content"]} for m in session.memory
+               if m.get("role") in ("user", "assistant") and m.get("kind") == "assist"][-HISTORY_TURNS * 2:]
     messages = [*history, {"role": "user", "content": f"{notebook_context(session)}\n\nREQUEST: {message}"}]
     system = system_prompt(session)
     request = _request_with_context(session, message)

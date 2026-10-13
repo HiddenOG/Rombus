@@ -64,6 +64,39 @@ def test_context_has_the_recipe_mode_and_latest_cells(session):
     assert "result = train.shape" in context and "sqft" in context
 
 
+def test_it_remembers_the_notebooks_code_names_and_requests(session):
+    """Consistency: every earlier cell (with the user's edits), the names it uses, what was asked."""
+    session.cells = [
+        {"type": "ask", "prompt": "price per sqft by location"},
+        {"type": "run", "tool": "custom_view", "message": "ok",
+         "args": {"code": "pps = train['price'] / train['sqft']\ntop = pps.groupby(train['location']).mean()\nresult = top"}},
+        {"type": "run", "tool": "impute_missing", "args": {"column": "sqft", "strategy": "median"}, "message": "Filled 0"},
+        {"type": "code", "kind": "change", "source": CHANGE_CODE.replace("return {}", "return {'min_sqft': 1}")},
+    ]
+    context = notebook_context(session)
+    assert "- price per sqft by location" in context  # what they asked for
+    assert "pps, top" in context and '"min_sqft"' in context  # names to reuse
+    assert "[2] look cell (ran)" in context and "pps = train['price']" in context  # the code itself
+    assert "[3] built-in impute_missing(column=sqft, strategy=median)" in context
+    assert "[4] change cell (not run yet)" in context
+
+
+def test_old_code_past_the_budget_is_summarised(session, monkeypatch):
+    monkeypatch.setattr(assistant, "CODE_BUDGET", 60)
+    session.cells = [{"type": "run", "tool": "custom_view", "args": {"code": "old_name = 1\nresult = old_name"}},
+                     {"type": "run", "tool": "custom_view", "args": {"code": "x = train.shape\nresult = x" + " " * 30}}]
+    context = notebook_context(session)
+    assert "[1] look cell (ran), 2 lines; defines: old_name" in context and "x = train.shape" in context
+
+
+def test_the_conversation_keeps_eight_exchanges(session, monkeypatch):
+    session.memory = [{"role": r, "content": f"{r} {i}", "kind": "assist"} for i in range(12) for r in ("user", "assistant")]
+    sent = fake_ai(monkeypatch, "Sure.")
+    asyncio.run(assistant.assist(session, "and now?"))
+    history = sent[0][:-1]
+    assert len(history) == 16 and history[0]["content"] == "user 4"
+
+
 def test_writes_code_for_a_request(session, monkeypatch):
     fake_ai(monkeypatch, "Drops rows with no area.\n```python\n" + CHANGE_CODE + "\n```")
     result = asyncio.run(assistant.assist(session, "drop rows with zero sqft"))

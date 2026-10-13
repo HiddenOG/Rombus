@@ -26,7 +26,7 @@ async def assist(request: ChatRequest, visitor: str = Depends(current_owner)):
             said += f"\n```step\n{json.dumps(result['step'])}\n```"
         session.memory += [{"role": "user", "content": request.message, "kind": "assist"},
                            {"role": "assistant", "content": said, "kind": "assist"}]
-        session.memory = session.memory[-20:]
+        session.memory = session.memory[-40:]
         await run_exclusive(session.session_id, session_manager.save, session)
     return result
 

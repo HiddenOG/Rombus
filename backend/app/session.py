@@ -495,7 +495,7 @@ class SessionManager:
             "target_column": session.target_column,
             "problem_type": session.problem_type,
             "completed_steps": json.dumps(session.completed_steps),
-            "memory": json.dumps(session.memory[-20:]),  # Keep last 20 messages
+            "memory": json.dumps(session.memory[-40:]),  # the last 40 messages (20 exchanges)
             "workflow_log": json.dumps(session.workflow_log[-50:]),
             "created_at": session.created_at,
             "updated_at": session.updated_at,
