@@ -385,7 +385,11 @@ def harden(workdir: str, memory_mb: int, seconds: int) -> None:
         os.setgroups([])
         os.setgid(uid)
         os.setuid(uid)
-    limit = memory_mb * 1024 * 1024
+    # The cap is memory_mb ON TOP of what's already mapped: the preloaded libraries (pandas,
+    # scikit-learn, matplotlib) take hundreds of MB of address space before any user code runs
+    with open("/proc/self/statm") as statm:
+        already = int(statm.read().split()[0]) * resource.getpagesize()
+    limit = already + memory_mb * 1024 * 1024
     resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
     resource.setrlimit(resource.RLIMIT_CPU, (seconds + 1, seconds + 2))
     resource.setrlimit(resource.RLIMIT_FSIZE, (64 * 1024 * 1024, 64 * 1024 * 1024))

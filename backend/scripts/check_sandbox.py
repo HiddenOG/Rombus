@@ -53,7 +53,7 @@ def main():
     config = call("GET", "/api/config")
     print(f"code cells: {config.get('custom_code')}, sandbox: {config.get('sandbox')}")
     if not config.get("custom_code"):
-        print("FAIL: code cells are off (the sandbox self-test may have failed; see the server log)")
+        print(f"::error title=Code sandbox::code cells are off: {config.get('code_off_reason')}")
         return 1
     csv = "x,y\n" + "\n".join(f"{i},{i * 2}" for i in range(40))
     sid = call("POST", "/api/upload", files=("check.csv", csv.encode()))["session_id"]
@@ -69,6 +69,8 @@ def main():
         shown = json.dumps(result.get("evidence") or result.get("message"))[:160]
         escaped = "GOT THROUGH" in shown
         print(f"{'FAIL' if escaped else 'ok  '} {what}: {shown}")
+        if escaped:  # (on GitHub, a line like this becomes a visible annotation)
+            print(f"::error title=Sandbox escape::{what}: {shown}")
         failed |= escaped
     after = cell(sid, "result = 2 + 2")
     alive = after.get("evidence", {}).get("output") == "4"

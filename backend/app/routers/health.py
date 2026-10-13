@@ -30,6 +30,7 @@ async def public_config():
         "custom_code": code["enabled"],
         "code_for": settings.CODE_FOR,  # "accounts": anonymous visitors are asked to sign in to run code
         "sandbox": code.get("sandbox"),
+        "code_off_reason": code.get("reason"),  # e.g. which sandbox protection failed its self-test
         "max_upload_mb": settings.MAX_UPLOAD_SIZE_MB,
         "max_rows": settings.MAX_ROWS,
     }
