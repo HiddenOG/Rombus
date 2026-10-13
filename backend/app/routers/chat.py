@@ -11,6 +11,22 @@ from app.session import run_exclusive, session_manager
 router = APIRouter()
 
 
+@router.post("/assist", dependencies=[Depends(limit("ai"))])
+async def assist(request: ChatRequest, visitor: str = Depends(current_owner)):
+    """The notebook assistant: answers, or writes one code cell for the user to read and run."""
+    from app.assistant import assist as ask_assistant
+    session = await load_owned(request.session_id, visitor)
+    result = await ask_assistant(session, request.message)
+    if not result.get("failed"):
+        # Remembered (with the code it wrote), so follow-ups like "now plot it" make sense
+        said = result["reply"] + (f"\n```python\n{result['code']}\n```" if result.get("code") else "")
+        session.memory += [{"role": "user", "content": request.message, "kind": "assist"},
+                           {"role": "assistant", "content": said, "kind": "assist"}]
+        session.memory = session.memory[-20:]
+        await run_exclusive(session.session_id, session_manager.save, session)
+    return result
+
+
 @router.post("/chat", response_model=ChatResponse, dependencies=[Depends(limit("ai"))])
 async def chat_with_copilot(request: ChatRequest, visitor: str = Depends(current_owner)):
     """Chat with the AI copilot."""

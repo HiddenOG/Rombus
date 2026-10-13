@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Loader2, ArrowUp, AlertCircle, X, Lock, LineChart, Wand2, Plus, Sparkles, Target, PanelLeftOpen, Upload } from 'lucide-react';
+import { Loader2, ArrowUp, AlertCircle, X, Lock, LineChart, Wand2, Plus, Sparkles, Target, PanelLeftOpen, Upload, Code2 } from 'lucide-react';
 import { PredictForm } from './PredictForm';
 import { KernelMenu } from './KernelMenu';
 import { ExportMenu } from './ExportMenu';
 import { StageProgress } from './StageProgress';
 import { Logo } from './Logo';
 import { NoteCell, AskCell, RunCell } from './Cells';
+import { CodeCell } from './CodeCell';
 import { StepEditor } from './StepEditor';
 import { Selectable, SelectionBar } from './CellSelection';
 import { useCellSelection } from '../hooks/useCellSelection';
@@ -64,7 +65,17 @@ export function Notebook({ nb, sidebarOpen, onToggleSidebar }) {
                     {cells.map(cell => {
                         let content;
                         if (cell.type === 'note') content = <NoteCell cell={cell} />;
-                        else if (cell.type === 'ask') {
+                        else if (cell.type === 'code') {
+                            content = (
+                                <CodeCell
+                                    cell={cell}
+                                    isProcessing={isProcessing}
+                                    canRun={nb.config.custom_code}
+                                    onChange={nb.editCodeCell}
+                                    onRun={nb.runCode}
+                                />
+                            );
+                        } else if (cell.type === 'ask') {
                             content = <AskCell cell={cell} number={numbers[cell.id]} onRun={nb.run} isProcessing={isProcessing} />;
                         } else content = (
                             <RunCell
@@ -119,7 +130,7 @@ function CommandBar({ nb }) {
     const submit = (e) => {
         e.preventDefault();
         if (!text.trim() || isProcessing) return;
-        nb.ask(text.trim());
+        nb.assist(text.trim());
         setText('');
     };
 
@@ -222,7 +233,7 @@ function CommandBar({ nb }) {
                         type="text"
                         value={text}
                         onChange={e => setText(e.target.value)}
-                        placeholder={sessionId ? 'Ask the copilot about your data…' : 'Upload a dataset to start'}
+                        placeholder={sessionId ? 'Ask a question, or say what to do: the assistant writes the code…' : 'Upload a dataset to start'}
                         maxLength={4000}
                         disabled={!sessionId || isProcessing}
                         className="min-w-0 flex-1 bg-transparent py-2 text-base text-ink outline-none placeholder:text-ink-3 disabled:cursor-not-allowed sm:text-[15px]"
@@ -239,8 +250,14 @@ function CommandBar({ nb }) {
 
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex flex-wrap gap-2">
-                        <QuickButton onClick={() => nb.ask('What should I do next?')} disabled={!sessionId || isProcessing}>
-                            <Sparkles className="h-3.5 w-3.5" /> Suggest next step
+                        <QuickButton onClick={() => { nb.addCodeCell('look'); setAdding(false); }} disabled={!sessionId || isProcessing || choosing}>
+                            <Code2 className="h-3.5 w-3.5" /> Code
+                        </QuickButton>
+                        <QuickButton
+                            onClick={() => nb.assist('Review what I have done so far. Point out mistakes, or anything that could leak information from the target or the test rows. Be brief, and only mention real problems.')}
+                            disabled={!sessionId || isProcessing || choosing}
+                        >
+                            <Sparkles className="h-3.5 w-3.5" /> Review my work
                         </QuickButton>
                         <QuickButton onClick={() => { setAdding(a => !a); setPredicting(false); }} disabled={!sessionId || isProcessing}>
                             <Plus className="h-3.5 w-3.5" /> Add step

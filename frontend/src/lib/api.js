@@ -87,6 +87,14 @@ export async function uploadFile(fileOrFiles) {
     return apiRequest('/api/upload', { method: 'POST', body: formData });
 }
 
+/** The notebook assistant: an answer, or one code cell ({reply, code?, kind?}) for the user to run. */
+export async function assist(sessionId, message) {
+    return apiRequest('/api/assist', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionId, message }),
+    });
+}
+
 export async function sendChat(sessionId, message) {
     return apiRequest('/api/chat', {
         method: 'POST',

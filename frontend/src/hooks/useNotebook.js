@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import * as api from '../lib/api';
+import { CODE_KINDS, CODE_TEMPLATES } from '../lib/codeCells';
 
 const STORAGE_KEY = 'automl.notebooks.v1';
 
@@ -175,6 +176,47 @@ export function useNotebook() {
         } catch (err) {
             patchCell(id, { status: 'error', reply: err.message });
         }
+    });
+
+    // The assistant: an answer, or code written into a new cell (never run: you read it and run it)
+    const assist = (prompt) => busy(async () => {
+        const id = newId();
+        setCells(prev => [...prev, { id, type: 'ask', prompt, status: 'thinking' }]);
+        try {
+            const data = await api.assist(sessionId, prompt);
+            patchCell(id, {
+                status: data.failed ? 'error' : 'done',
+                reply: data.reply,
+                provider: data.provider,
+                model: data.model,
+                fallbackNote: data.fallback_note,
+            });
+            if (data.code) {
+                addCell({ type: 'code', kind: data.kind, source: data.code, byAi: true, from: id, syntaxError: data.syntax_error || null });
+            }
+        } catch (err) {
+            patchCell(id, { status: 'error', reply: err.message });
+        }
+    });
+
+    const addCodeCell = (kind = 'look') => addCell({ type: 'code', kind, source: CODE_TEMPLATES[kind] });
+    const editCodeCell = (cell, patch) => patchCell(cell.id, patch);
+
+    // Run a code cell: it becomes a result cell in the same place (its code stays editable there)
+    const runCode = (cell) => busy(async () => {
+        const tool = CODE_KINDS[cell.kind].tool;
+        const data = await api.executeAction(sessionId, tool, { code: cell.source });
+        if (!data.success) {
+            patchCell(cell.id, { error: data.message });
+            return;
+        }
+        setSummary(data.new_state_summary);
+        setCells(prev => prev.map(c => (c.id === cell.id ? {
+            id: c.id, type: 'run', tool, args: data.step?.args ?? { code: cell.source }, message: data.message,
+            evidence: data.evidence, stepId: data.step?.id ?? null, version: data.new_state_summary?.data_version,
+            byAi: c.byAi,
+        } : c)));
+        refreshNotebooks();
     });
 
     const run = (action, fromCellId = null) => busy(async () => {
@@ -390,6 +432,10 @@ export function useNotebook() {
         deleteCell,
         deleteCells,
         undoStep,
+        assist,
+        addCodeCell,
+        editCodeCell,
+        runCode,
         copyCell,
         openNotebook,
         newNotebook,
