@@ -506,6 +506,18 @@ def read_reply(session: DataSession, text: str, request: str) -> Dict[str, Any]:
     return {"words": words, "code": code, "problem": problem}
 
 
+def examine(session: DataSession, text: str, request: str) -> Dict[str, Any]:
+    """read_reply, plus a trial run of any code (blocking: called on the notebook's worker thread)."""
+    answer = read_reply(session, text, request)
+    if answer.get("code") and not answer.get("problem"):
+        answer["code_problem"] = code_problem(session, answer["code"])
+    return answer
+
+
+def _briefing(session: DataSession) -> Tuple[str, str]:
+    return notebook_context(session), system_prompt(session)
+
+
 def _request_with_context(session: DataSession, message: str) -> str:
     """The request, plus the assistant's previous answer when this is a short "yes / do it"."""
     from app.intent import FOLLOW_UP
@@ -554,19 +566,20 @@ async def assist(session: DataSession, message: str) -> Dict[str, Any]:
 
     A proposed built-in is checked before anyone sees it, and code is checked for syntax; either gets
     one retry, told exactly what was wrong."""
+    from app.session import run_exclusive
+    # Reading the notebook and checking answers (dry runs, trial runs of code) is blocking work: it runs
+    # on the notebook's worker thread, under its lock, so the server keeps serving everyone else
     history = [{"role": m["role"], "content": m["content"]} for m in session.memory
                if m.get("role") in ("user", "assistant") and m.get("kind") == "assist"][-HISTORY_TURNS * 2:]
-    messages = [*history, {"role": "user", "content": f"{notebook_context(session)}\n\nREQUEST: {message}"}]
-    system = system_prompt(session)
+    context, system = await run_exclusive(session.session_id, _briefing, session)
+    messages = [*history, {"role": "user", "content": f"{context}\n\nREQUEST: {message}"}]
     request = _request_with_context(session, message)
     reply = await complete(system, messages)
     if reply.get("failed"):
         return {"failed": True, "reply": reply["text"]}
 
-    answer = read_reply(session, reply["text"], request)
-    if answer.get("code") and not answer.get("problem"):
-        answer["code_problem"] = code_problem(session, answer["code"])
-    trouble = (f"That step can't be used: {answer['problem']}. Send a corrected ```step block, or a ```python "
+    answer = await run_exclusive(session.session_id, examine, session, reply["text"], request)
+    trouble =(f"That step can't be used: {answer['problem']}. Send a corrected ```step block, or a ```python "
                "cell if no built-in fits." if answer.get("problem")
                else f"That code has {answer['code_problem']}. Send the corrected cell."
                if answer.get("code_problem") else None)
@@ -574,9 +587,7 @@ async def assist(session: DataSession, message: str) -> Dict[str, Any]:
         retry = await complete(system, [*messages, {"role": "assistant", "content": reply["text"]},
                                         {"role": "user", "content": trouble}])
         if not retry.get("failed"):
-            second = read_reply(session, retry["text"], request)
-            if second.get("code") and not second.get("problem"):
-                second["code_problem"] = code_problem(session, second["code"])
+            second = await run_exclusive(session.session_id, examine, session, retry["text"], request)
             fixed = second.get("step") or (second.get("code") and not second.get("code_problem"))
             if fixed:
                 # Its first words described the broken version only if there were none the second time

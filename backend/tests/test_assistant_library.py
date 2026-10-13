@@ -212,6 +212,27 @@ def test_number_cleaning_says_which_words_it_dropped():
     assert "'Sq. Yards'" in message and "'Acres'" in message and "aren't comparable" in message
 
 
+def test_checking_an_answer_doesnt_stop_the_server(session, monkeypatch):
+    """Trial runs happen on the notebook's worker thread: other requests keep being served meanwhile."""
+    import time
+    monkeypatch.setattr(assistant, "code_problem", lambda s, code: time.sleep(0.6))
+    fake_ai(monkeypatch, "```python\nresult = train.head()\n```")
+
+    async def ticks_while_checking():
+        ticks = 0
+
+        async def ticker():
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.05)
+                ticks += 1
+        running = asyncio.create_task(ticker())
+        await assistant.assist(session, "show the first rows")
+        running.cancel()
+        return ticks
+    assert asyncio.run(ticks_while_checking()) >= 8  # ~12 in 0.6 s; a blocked loop manages 0 or 1
+
+
 def test_custom_needs_still_get_code(session, monkeypatch):
     fake_ai(monkeypatch, "A custom rule.\n```python\nresult = train.groupby('location')['price'].std()\n```")
     result = asyncio.run(assistant.assist(session, "std of price per location as a table"))

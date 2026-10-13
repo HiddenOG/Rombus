@@ -1,43 +1,19 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { Play, Sparkles, AlertTriangle, Lock } from 'lucide-react';
 import { CODE_KINDS, CODE_TEMPLATES } from '../lib/codeCells';
-
-const INDENT = '    ';
+import { PythonEditor } from './PythonEditor';
 
 /**
  * CodeCell — an unrun code cell, like Jupyter's: write (or read what the assistant wrote), pick its
  * kind, and run it. Once it runs it becomes a result cell in the same place, code still editable.
  */
 export function CodeCell({ cell, isProcessing, canRun, onChange, onRun }) {
-    const editor = useRef(null);
     const source = cell.source ?? '';
 
     const setKind = (kind) => {
         // An untouched starting template follows the kind; real code is kept as it is
         const untouched = !source.trim() || source === CODE_TEMPLATES[cell.kind];
         onChange(cell, { kind, ...(untouched ? { source: CODE_TEMPLATES[kind] } : {}), error: null });
-    };
-
-    const onKeyDown = (e) => {
-        if (e.key === 'Enter' && e.shiftKey) {  // Jupyter habit: Shift+Enter runs
-            e.preventDefault();
-            if (!isProcessing && canRun) onRun(cell);
-            return;
-        }
-        if (e.key !== 'Tab') return;
-        e.preventDefault();
-        const el = e.target;
-        const { selectionStart: start, selectionEnd: end } = el;
-        const lineStart = source.lastIndexOf('\n', start - 1) + 1;
-        if (e.shiftKey) {
-            if (source.startsWith(INDENT, lineStart)) {
-                onChange(cell, { source: source.slice(0, lineStart) + source.slice(lineStart + INDENT.length) });
-                requestAnimationFrame(() => el.setSelectionRange(Math.max(lineStart, start - INDENT.length), Math.max(lineStart, end - INDENT.length)));
-            }
-            return;
-        }
-        onChange(cell, { source: source.slice(0, start) + INDENT + source.slice(end) });
-        requestAnimationFrame(() => el.setSelectionRange(start + INDENT.length, start + INDENT.length));
     };
 
     return (
@@ -78,16 +54,12 @@ export function CodeCell({ cell, isProcessing, canRun, onChange, onRun }) {
                     </button>
                 </div>
 
-                <textarea
-                    ref={editor}
+                <PythonEditor
                     value={source}
-                    onChange={e => onChange(cell, { source: e.target.value, error: null })}
-                    onKeyDown={onKeyDown}
-                    spellCheck={false}
-                    aria-label="Code"
-                    rows={Math.min(30, Math.max(4, source.split('\n').length + 1))}
-                    className="block w-full resize-y bg-surface px-4 py-3 font-mono text-[12.5px] leading-[1.5] text-ink outline-none"
+                    onChange={code => onChange(cell, { source: code, error: null })}
+                    onRun={() => { if (!isProcessing && canRun) onRun(cell); }}
                 />
+                <div className="border-t border-line" />
 
                 {cell.problem && !cell.error && (
                     <Notice tone="amber" icon={AlertTriangle}>A trial run of this code found {cell.problem}. Fix it before running, or ask the assistant to.</Notice>

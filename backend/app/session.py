@@ -458,8 +458,9 @@ class SessionManager:
         for sid in list(self._sessions):
             if len(self._sessions) <= settings.MAX_SESSIONS_IN_MEMORY:
                 break
-            if sid != session.session_id and not _notebook_locks[sid].locked():
+            if sid != session.session_id and _idle(sid):
                 del self._sessions[sid]
+                _notebook_locks.pop(sid, None)  # the lock table doesn't grow with every notebook ever opened
                 self._saved_files = {k: v for k, v in self._saved_files.items() if not k.startswith(sid)}
 
     def _save_or_delete(self, key: str, df: Optional[pd.DataFrame]) -> None:
@@ -596,6 +597,8 @@ class SessionManager:
     def delete_session(self, session_id: str):
         """Remove a notebook everywhere: memory, data files and its database record."""
         self._sessions.pop(session_id, None)
+        if _idle(session_id):
+            _notebook_locks.pop(session_id, None)
         if self._files:
             for suffix in ("", "_original", "_train", "_test"):
                 self._files.delete(f"{session_id}{suffix}")
@@ -613,6 +616,12 @@ session_manager = SessionManager()
 
 
 _notebook_locks: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+
+def _idle(session_id: str) -> bool:
+    """No request is working on this notebook or waiting to (safe to unload, or to forget its lock)."""
+    lock = _notebook_locks.get(session_id)  # .get: looking mustn't create an entry
+    return lock is None or (not lock.locked() and not getattr(lock, "_waiters", None))
 
 
 async def run_exclusive(session_id: str, fn: Callable[..., T], *args: Any) -> T:
