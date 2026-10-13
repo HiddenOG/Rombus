@@ -67,7 +67,7 @@ def test_context_has_the_recipe_mode_and_latest_cells(session):
 def test_writes_code_for_a_request(session, monkeypatch):
     fake_ai(monkeypatch, "Drops rows with no area.\n```python\n" + CHANGE_CODE + "\n```")
     result = asyncio.run(assistant.assist(session, "drop rows with zero sqft"))
-    assert result["kind"] == "change" and result["code"].startswith("import numpy") and not result["syntax_error"]
+    assert result["kind"] == "change" and result["code"].startswith("import numpy") and not result["problem"]
     assert result["reply"] == "Drops rows with no area."
 
 

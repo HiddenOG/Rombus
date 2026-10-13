@@ -181,11 +181,23 @@ class CleanNumericString(Step):
             msg += f" {ranges} ranges (like '2100 - 2850') became their midpoint."
         if new_blanks:
             msg += f" {new_blanks} values had no usable number and became blanks."
+        # Words dropped next to a number ("2 BHK" -> 2 is the point; "188 Sq. Yards" -> 188 may be a different unit)
+        text = before[col].dropna().astype(str)
+        words = text[text.str.contains(r"[A-Za-z]") & after[col].reindex(text.index).notna()]
+        words = words.str.replace(NUMBER_PATTERN, "", n=1, regex=True).str.strip(" $€£₹%")
+        if len(words):
+            common = words.value_counts().head(4)
+            listed = ", ".join(f"'{w}' ({n})" for w, n in common.items())
+            msg += f" Words were dropped from {len(words)} values, keeping the number: {listed}."
+            if words.nunique() > 1:
+                msg += " If those words are different units, these numbers aren't comparable: check them."
         return msg
 
 
 # "2100 - 2850", "1,200-1,500": a range, read as its midpoint
 RANGE_PATTERN = r"^\s*(\d[\d,]*\.?\d*)\s*-\s*(\d[\d,]*\.?\d*)\s*$"
+# A number with optional thousands commas, decimals and minus sign: "$1,200" -> 1,200, "2 BHK" -> 2
+NUMBER_PATTERN = r"(-?(?:\d[\d,]*)?\.?\d+)"
 
 
 def clean_number(series: pd.Series) -> pd.Series:
@@ -194,7 +206,9 @@ def clean_number(series: pd.Series) -> pd.Series:
     ends = text.str.extract(RANGE_PATTERN)
     low = pd.to_numeric(ends[0].str.replace(",", ""), errors="coerce")
     high = pd.to_numeric(ends[1].str.replace(",", ""), errors="coerce")
-    plain = pd.to_numeric(text.str.replace(r"[^\d.\-]", "", regex=True), errors="coerce").where(series.notna())
+    # The first number in the text: "188.89Sq. Yards" -> 188.89 (stripping letters left "188.89." -> blank)
+    first = text.str.extract(NUMBER_PATTERN)[0].str.replace(",", "")
+    plain = pd.to_numeric(first, errors="coerce").where(series.notna())
     is_range = low.notna() & high.notna()
     if not is_range.any():
         return plain  # no ranges: exactly as before (whole numbers stay whole numbers)
@@ -427,7 +441,7 @@ class AddColumn(Step):
             raise ValueError(f"There's already a column called '{name}'.")
         formula = self.args.get("formula", "")
         try:
-            evaluate_formula(self._without_target(train), formula)
+            values = evaluate_formula(self._without_target(train), formula)
         except ValueError:
             if self.ctx.target and self.ctx.target in train.columns:
                 try:  # does it only fail because it uses the target?
@@ -440,6 +454,9 @@ class AddColumn(Step):
                     f"the feature couldn't be made. To spot odd values, use a view (Group & summarise, Filter "
                     f"rows); to drop extreme rows from training, use Remove rows where…") from None
             raise
+        if len(train) and values.isna().all():
+            raise ValueError(f"'{formula}' gives no usable value for any row (blank inputs, dividing by "
+                             "zero, or numbers too large), so the column would be empty.")
         return {}
 
     def _without_target(self, df):

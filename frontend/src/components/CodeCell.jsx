@@ -89,8 +89,8 @@ export function CodeCell({ cell, isProcessing, canRun, onChange, onRun }) {
                     className="block w-full resize-y bg-surface px-4 py-3 font-mono text-[12.5px] leading-[1.5] text-ink outline-none"
                 />
 
-                {cell.syntaxError && !cell.error && (
-                    <Notice tone="amber" icon={AlertTriangle}>The assistant's code may not run as written ({cell.syntaxError}). Check it before running.</Notice>
+                {cell.problem && !cell.error && (
+                    <Notice tone="amber" icon={AlertTriangle}>A trial run of this code found {cell.problem}. Fix it before running, or ask the assistant to.</Notice>
                 )}
                 {cell.error && <Notice tone="red" icon={AlertTriangle}>{cell.error}</Notice>}
                 {!canRun && (

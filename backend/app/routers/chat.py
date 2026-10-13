@@ -1,5 +1,7 @@
 """Chat router — AI copilot conversation endpoint."""
 
+import json
+
 from fastapi import APIRouter, Depends
 
 from app.access import current_owner, limit, load_owned
@@ -18,8 +20,10 @@ async def assist(request: ChatRequest, visitor: str = Depends(current_owner)):
     session = await load_owned(request.session_id, visitor)
     result = await ask_assistant(session, request.message)
     if not result.get("failed"):
-        # Remembered (with the code it wrote), so follow-ups like "now plot it" make sense
+        # Remembered (with the step or code it proposed), so follow-ups like "now plot it" make sense
         said = result["reply"] + (f"\n```python\n{result['code']}\n```" if result.get("code") else "")
+        if result.get("step"):
+            said += f"\n```step\n{json.dumps(result['step'])}\n```"
         session.memory += [{"role": "user", "content": request.message, "kind": "assist"},
                            {"role": "assistant", "content": said, "kind": "assist"}]
         session.memory = session.memory[-20:]

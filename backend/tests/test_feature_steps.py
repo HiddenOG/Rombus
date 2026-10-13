@@ -110,8 +110,9 @@ def test_formulas_refuse_anything_but_arithmetic(session, formula):
 
 
 def test_huge_powers_dont_hang(session):
-    run(session, "add_column", name="big", formula="10 ** 10 ** 10 + PRICE")
-    assert session.df["big"].isna().all()  # overflow -> blank, instantly
+    result = execute_tool("add_column", session, {"name": "big", "formula": "10 ** 10 ** 10 + PRICE"})
+    # Overflow -> blank, instantly; a column with nothing in it is refused rather than added
+    assert not result["success"] and "no usable value" in result["message"] and "big" not in session.df
 
 
 def test_backticks_for_names_with_spaces(session):

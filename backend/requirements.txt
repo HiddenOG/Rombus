@@ -15,4 +15,5 @@ pyarrow>=25
 sqlalchemy>=2.0
 pyjwt[crypto]>=2.10  # checks Supabase login tokens
 matplotlib>=3.9  # charts drawn by custom view code (optional: views work without it)
+seaborn>=0.13  # the plotting library code cells most often reach for
 psycopg[binary]>=3.2  # PostgreSQL / Supabase DATABASE_URL (unused with the default SQLite)

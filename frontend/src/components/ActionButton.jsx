@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, ArrowRight } from 'lucide-react';
+import { Play, ArrowRight, ShieldCheck } from 'lucide-react';
 
 const humanize = (name) => name.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
 
@@ -22,7 +22,17 @@ export function ActionButton({ action, onExecute, isProcessing }) {
     return (
         <div className="flex items-start gap-3 rounded-xl border border-line bg-surface p-3 transition-colors hover:border-brand-200">
             <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-ink">{humanize(action.tool)}</p>
+                <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink">
+                    {humanize(action.tool)}
+                    {action.verified && (
+                        <span
+                            title="A built-in step: tested, replayed exactly on the test rows and in the exported script"
+                            className="flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800"
+                        >
+                            <ShieldCheck className="h-3 w-3" /> Verified step
+                        </span>
+                    )}
+                </p>
                 {args.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {args.map(([key, value]) => (

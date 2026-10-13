@@ -79,6 +79,9 @@ AUTOML_REGRESSION_GRIDS = {
 
 
 # Long names people (and AI models) naturally write, mapped to the short keys above
+# Names of libraries that aren't installed, mapped to the closest built-in (the message says so)
+STAND_INS = {"xgboost", "gbm"}
+
 ALGORITHM_ALIASES = {
     "random_forest": "rf", "randomforest": "rf",
     "gradient_boosting": "gb", "gradientboosting": "gb", "gbm": "gb", "xgboost": "gb",
@@ -207,7 +210,14 @@ def safe_cv_folds(session: DataSession, requested: int) -> int:
     """Cross-validation folds, capped so every fold can contain every class."""
     folds = min(int(requested), len(session.X_train))
     if session.problem_type == "classification":
-        folds = min(folds, int(session.y_train.value_counts().min()))
+        counts = session.y_train.value_counts()
+        if counts.min() < 2:
+            rare = ", ".join(f"'{c}'" for c in counts[counts < 2].index[:5])
+            raise ValueError(
+                f"Some answers appear only once in the rows the models learn from ({rare}), and checking a model "
+                f"needs at least 2 of each. Get more rows, or if '{session.target_column}' is really a number, "
+                "predict it as one: change its type to number before choosing it as the target.")
+        folds = min(folds, int(counts.min()))
     return max(folds, 2)
 
 
@@ -298,7 +308,11 @@ def cv_splitter(session: DataSession, folds: int):
 def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Train one or more ML models (doing the practice split first if it hasn't happened)."""
     model_registry = CLASSIFICATION_MODELS if session.problem_type == "classification" else REGRESSION_MODELS
-    alg_names = [ALGORITHM_ALIASES.get(str(a).lower().replace(" ", "_"), str(a).lower()) for a in args.get("algorithms", ["rf", "gb"])]
+    asked = args.get("algorithms", ["rf", "gb"])
+    if isinstance(asked, str):  # "rf, gb" rather than ["rf", "gb"]: not letter by letter
+        asked = [a for a in asked.split(",") if a.strip()]
+    asked = [str(a).strip() for a in asked]
+    alg_names = [ALGORITHM_ALIASES.get(a.lower().replace(" ", "_"), a.lower()) for a in asked]
     if session.problem_type == "regression":
         # "lr" is logistic regression for yes/no problems; for numbers it can only mean linear regression
         alg_names = ["linear" if a == "lr" else a for a in alg_names]
@@ -307,6 +321,8 @@ def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": False,
                 "message": f"Unknown algorithm{'s' if len(unknown) > 1 else ''} for {session.problem_type}: "
                            f"{', '.join(unknown)}. Available: {', '.join(model_registry)}."}
+    # Stand-ins say so: "xgboost" isn't installed here, its closest built-in is
+    stand_ins = [f"{a} → {ALGORITHM_ALIASES[a.lower()]}" for a in asked if a.lower() in STAND_INS]
 
     auto_split = ensure_practice_split(session)
     cv_folds = safe_cv_folds(session, args.get("cv_folds", 5))
@@ -316,6 +332,8 @@ def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     msg = f"Trained {len(results)} model{'s' if len(results) != 1 else ''}. Best on the practice split: {best}."
     if auto_split:
         msg = f"{auto_split} {msg}"
+    if stand_ins:
+        msg += f" Not installed here, so the closest built-in was used: {', '.join(stand_ins)}."
     if best:
         msg += " When you're happy with the cleaning and the model, run the final exam on the locked test rows."
     return {
@@ -487,11 +505,20 @@ def predict(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": False, "message": "Provide 'features' dict with column values."}
 
     # The new row goes through the same recipe (with the training sticky notes) as the training rows,
-    # then gets the exact columns the model was trained on.
+    # then gets the exact columns the model was trained on. It's given in the ORIGINAL columns; a column
+    # renamed by the recipe may be given by its new name ('bhk' for 'size').
     raw_columns = [c for c in (session.raw_train if session.raw_train is not None else session.df).columns
                    if c != session.target_column]
-    missing = [c for c in raw_columns if c not in features]
-    prepared = session.prepare(pd.DataFrame([features]))
+    original_name = {}
+    for line in reversed(session.recipe):
+        if line.tool == "rename_column":
+            new, old = str(line.args.get("new_name", "")).strip(), line.args.get("column")
+            original_name[new] = original_name.get(old, old)
+    features = {original_name.get(k, k) if k not in raw_columns else k: v for k, v in features.items()}
+    ignored = [k for k in features if k not in raw_columns]
+    removed = {c for line in session.recipe if line.tool == "remove_columns" for c in line.args.get("columns", [])}
+    missing = [c for c in raw_columns if c not in features and c not in removed]
+    prepared = session.prepare(pd.DataFrame([{k: v for k, v in features.items() if k in raw_columns}]))
     X = model_features(prepared, session.target_column).reindex(columns=session.X_train.columns, fill_value=0)
 
     prediction = model.predict(X)[0]
@@ -511,6 +538,9 @@ def predict(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         msg += f" Confidence: {probabilities.get(str(prediction), 0):.0%}."
     if missing:
         msg += f" Not provided, so treated as blank: {', '.join(missing)}."
+    if ignored:
+        msg += (f" Ignored (not columns of the original data): {', '.join(map(str, ignored))}. Give values for "
+                f"the original columns: the recipe makes the rest.")
     return {
         "success": True,
         "message": msg,

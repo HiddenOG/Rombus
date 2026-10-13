@@ -11,6 +11,7 @@ Three kinds of code cell, matching what the app can run and replay:
 """
 
 import ast
+import json
 import logging
 import re
 import time
@@ -44,8 +45,9 @@ There are three kinds of cell:
            return df
    Put TRAIN_ONLY = True at the top when it only drops or filters training rows (outliers, duplicates).
    apply also runs later on the test rows and on single new rows, so it must not compute statistics from df.
-3. MODELS: define `models = {"name": SomeScikitLearnModel(...)}` (imports included). They're trained on the
-   training rows and graded on the locked test rows by the final exam.
+3. MODELS: define `models = {"name": SomeScikitLearnModel(...)}` (imports included), nothing else needed.
+   The app trains them on the cleaned training rows and the final exam grades them on the locked test rows.
+   There's no `train` here: only X_learn (features) and y_learn (target), if you must look at them.
 
 Rules:
 - import pandas as pd / numpy as np at the top; scikit-learn and matplotlib are fine. No files, network or OS.
@@ -56,7 +58,153 @@ Rules:
 - Short, readable code with brief comments.
 """.strip()
 
+LIBRARY_RULES = """
+VERIFIED LIBRARY FIRST. The app has built-in steps and views (listed below as name(settings): what it
+does). They are tested, replay exactly on the test rows and in the exported script, and can't leak.
+When ONE of them does what was asked, don't write code: reply with one sentence and a ```step block:
+```step
+{"tool": "impute_missing", "arguments": {"column": "bath", "strategy": "median"}}
+```
+Write a ```python cell only when no built-in does it (a custom rule, an unusual chart, several steps
+at once that no single built-in covers). Never both in one reply. Settings: * means required;
+a|b|c means pick one of those.
+Don't ask whether to go ahead: the user's Run button is the confirmation. Ask a question only when
+the request can't be done without an answer (e.g. which of two columns they mean).
+A LOOK cell changes nothing: renaming, cleaning, dropping or adding columns must be a built-in step
+or a CHANGE cell.
+""".strip()
+
+NO_CODE_RULES = """
+Running code is switched off on this server, so a ```python cell can't run here. Use a built-in step
+whenever one fits; if none does, say so plainly and suggest the closest built-in, or write the code
+only if they ask for it (they can run it on their own machine).
+""".strip()
+
+# Never in the catalogue: running code (that's what cells are), re-locking the test rows (shopping for a
+# lucky split), and moving through the notebook (buttons do that)
+NOT_IN_LIBRARY = {"train_test_split", "transition_stage", "undo"}
+
+# Settings that name a column, beyond those described as "Exact column name(s)"
+COLUMN_SETTINGS = {"group_by", "order_by", "time_column", "align_on", "hue"}
+COLUMN_SETTINGS_FOR = {("plot_line", "y"), ("pivot_table", "columns"), ("pivot_table", "rows"),
+                       ("pivot_table", "value"), ("plot_correlation", "value"), ("group_summary", "value")}
+# Settings that take several columns comma-separated in one string
+COMMA_LISTS = {("group_summary", "value")}
+
 MAX_CELLS_IN_CONTEXT = 6
+
+
+def library(session: DataSession) -> List[str]:
+    """The built-ins the assistant may propose right now."""
+    from app.tools import HIDDEN_FROM_AI, available_tools
+    names = [n for n in available_tools(session) if n not in HIDDEN_FROM_AI and n not in NOT_IN_LIBRARY]
+    if session.is_split:  # changing the target or the mode is a deliberate edit, not a suggestion
+        names = [n for n in names if n not in ("select_target", "clean_only")]
+    return names
+
+
+def catalogue(session: DataSession) -> str:
+    """One line per built-in: name(settings): description. Compact, so small models read it quickly."""
+    from app.tools import TOOL_SPECS
+    from app.tools.model import CLASSIFICATION_MODELS, REGRESSION_MODELS
+    lines = []
+    for name in library(session):
+        spec = TOOL_SPECS[name]
+        required = set(spec["parameters"]["required"])
+        settings_ = []
+        for key, prop in spec["parameters"]["properties"].items():
+            enum = prop.get("enum") or (prop.get("items") or {}).get("enum")
+            if name == "train_models" and key == "algorithms" and session.problem_type:
+                enum = sorted(CLASSIFICATION_MODELS if session.problem_type == "classification" else REGRESSION_MODELS)
+            shown = key + ("*" if key in required else "")
+            if enum:
+                shown += ": " + "|".join(map(str, enum)) + (" (list)" if prop.get("type") == "array" else "")
+            elif prop.get("type") == "array":
+                shown += " (list)"
+            elif key in FREE_TEXT:  # the syntax lives in the setting's own description
+                shown += f" [{_first_sentence(prop.get('description', ''))}]"
+            settings_.append(shown)
+        description = _first_sentence(spec["description"])
+        lines.append(f"- {name}({', '.join(settings_)}): {description}")
+    return "\n".join(lines)
+
+
+FREE_TEXT = {"conditions", "formula", "value", "into", "pattern", "characters", "find"}
+
+
+def _first_sentence(text: str) -> str:
+    """Up to the first full stop that isn't part of 'e.g.' / 'i.e.'."""
+    return re.split(r"(?<!e\.g)(?<!i\.e)\.\s", text.strip(), maxsplit=1)[0].rstrip(".")
+
+
+def _is_column_setting(tool: str, key: str, prop: Dict[str, Any]) -> bool:
+    described = str(prop.get("description", "")).lower().startswith("exact column name")
+    return described or key in COLUMN_SETTINGS or (tool, key) in COLUMN_SETTINGS_FOR
+
+
+def check_step(session: DataSession, step: Any, request: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Check a proposed built-in before anyone sees it: (step, None) when it's sound, else (None, why).
+
+    The tool must be in the library now, settings known, required ones present, choices valid, column
+    names real, conditions and formulas readable, and judgement steps only when they were asked for."""
+    from app.expressions import parse_filter
+    from app.intent import asked_for
+    from app.recipe import STEP_TYPES, Line, run_line
+    from app.tools import TOOL_SPECS
+    if not isinstance(step, dict) or not isinstance(step.get("tool"), str):
+        return None, 'the step block must be JSON like {"tool": "...", "arguments": {...}}'
+    # Settings written beside "tool" instead of inside "arguments" (models do this) are still settings
+    loose = {k: v for k, v in step.items() if k not in ("tool", "arguments", "explanation")}
+    tool, args = step["tool"], step.get("arguments") or loose
+    if tool not in TOOL_SPECS or tool not in library(session):
+        return None, f"'{tool}' isn't a built-in available right now"
+    if not isinstance(args, dict):
+        return None, "arguments must be a JSON object"
+    params = TOOL_SPECS[tool]["parameters"]
+    args = {k: v for k, v in args.items() if v not in (None, "")}
+    unknown = [k for k in args if k not in params["properties"]]
+    if unknown:
+        return None, f"{tool} has no setting {', '.join(unknown)} (its settings: {', '.join(params['properties']) or 'none'})"
+    missing = [k for k in params["required"] if k not in args]
+    if missing:
+        return None, f"{tool} needs {', '.join(missing)}"
+
+    columns = [str(c) for c in session.df.columns]
+    for key, value in args.items():
+        prop = params["properties"][key]
+        enum = prop.get("enum") or (prop.get("items") or {}).get("enum")
+        values = value if isinstance(value, list) else [value]
+        if prop.get("type") == "array" and not isinstance(value, list):
+            args[key] = values = [v.strip() for v in str(value).split(",")] if isinstance(value, str) else [value]
+        if enum and tool != "train_models":  # algorithm names have aliases; the tool itself checks those
+            bad = [v for v in values if v not in enum]
+            if bad:
+                return None, f"{key} must be one of {', '.join(map(str, enum))} (got {', '.join(map(str, bad))})"
+        if _is_column_setting(tool, key, prop):
+            names = [n.strip() for v in values for n in (str(v).split(",") if (tool, key) in COMMA_LISTS else [str(v)])]
+            unknown_cols = [n for n in names if n not in columns]
+            if unknown_cols:
+                return None, f"no column named {', '.join(unknown_cols)} (columns: {', '.join(columns)})"
+
+    try:
+        if tool in STEP_TYPES:
+            # A dry run on a copy of the training rows: every error the step itself would raise (a formula
+            # using the target, an unknown column in a condition, a one-hot too big) is caught here
+            if tool == "time_feature" and not args.get("order_by") and session.time_column:
+                args["order_by"] = session.time_column
+            run_line(Line(tool, dict(args)), session.df.copy(), session.ctx)
+        elif tool == "filter_rows":
+            parse_filter(session.df.head(200), str(args["conditions"]))
+    except ValueError as e:
+        return None, str(e)
+    except Exception:
+        logger.exception("Dry run of a proposed %s failed", tool)
+        return None, "it fails on this data"
+
+    if not asked_for(tool, request):
+        return None, (f"{tool} is a judgement call the user didn't ask for: only propose it when they ask for "
+                      "that kind of change")
+    return {"tool": tool, "arguments": args}, None
 
 
 def notebook_context(session: DataSession) -> str:
@@ -201,7 +349,8 @@ async def complete(system: str, messages: List[Dict[str, str]]) -> Dict[str, Any
 
 # ── Reading the answer ───────────────────────────────────────────────────────────
 
-_CODE_BLOCK = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.S)
+_CODE_BLOCK = re.compile(r"```(?:python|py)?[ \t]*\n(.*?)```", re.S)
+_STEP_BLOCK = re.compile(r"```(?:step|json)\s*(\{.*?\})\s*```", re.S)  # on its own lines or on one line
 
 
 def split_reply(text: str) -> Tuple[str, Optional[str]]:
@@ -211,6 +360,91 @@ def split_reply(text: str) -> Tuple[str, Optional[str]]:
         return (text or "").strip(), None
     words = (text[:match.start()] + text[match.end():]).strip()
     return words, match.group(1).strip("\n")
+
+
+def split_step(text: str) -> Tuple[str, Any]:
+    """(the words without the step block, the parsed step, or the raw text if it isn't JSON, or None)."""
+    match = _STEP_BLOCK.search(text or "")
+    if not match:
+        return text or "", None
+    words = (text[:match.start()] + text[match.end():]).strip()
+    try:
+        return words, json.loads(match.group(1))
+    except ValueError:
+        return words, match.group(1)
+
+
+# Enough rows to meet the odd values ("188.89Sq. Yards" sat past row 2,000 in the Bengaluru data)
+DRY_RUN_ROWS = 50_000
+
+
+def code_problem(session: DataSession, code: str) -> Optional[str]:
+    """Why this code won't work, found by a syntax check and a trial run on a copy of (some of) the
+    training rows. None when it runs. The notebook itself never changes."""
+    from app.recipe import Line, run_line
+    from app.user_code import run_user_code
+    error = syntax_error(code)
+    if error:
+        return f"a syntax error ({error})"
+    if not settings.ALLOW_CUSTOM_CODE:
+        return None  # code can't run on this server: nothing more to check
+    rows = session.df.head(DRY_RUN_ROWS).copy()
+    try:
+        kind = cell_kind(code)
+        if kind == "change":
+            run_line(Line("custom_code", {"code": code}), rows, session.ctx)
+        elif kind == "models":
+            features = rows.drop(columns=[session.target_column], errors="ignore")
+            target = rows[session.target_column] if session.target_column in rows else None
+            models = run_user_code(code, {"X_learn": features, "y_learn": target}).namespace.get("models")
+            if not isinstance(models, dict) or not all(hasattr(m, "fit") and hasattr(m, "predict") for m in models.values()):
+                return "`models` must be a dict of {name: model with fit() and predict()}"
+        else:
+            run_user_code(code, {"train": rows, "df": rows})
+    except ValueError as e:
+        return f"an error when run: {e}"
+    except Exception as e:
+        return f"an error when run: {type(e).__name__}: {e}"
+    return None
+
+
+def read_reply(session: DataSession, text: str, request: str) -> Dict[str, Any]:
+    """What an answer holds: words, and a checked built-in step OR a code cell.
+    {"words", "step"?, "code"?, "problem"?}: problem is why a proposed step can't be used."""
+    words, step = split_step(text)
+    words, code = split_reply(words)
+    if step is None:
+        return {"words": words, "code": code}
+    checked, problem = check_step(session, step, request)
+    if checked:
+        return {"words": words, "step": checked}  # the verified step wins over any code alongside it
+    return {"words": words, "code": code, "problem": problem}
+
+
+def _request_with_context(session: DataSession, message: str) -> str:
+    """The request, plus the assistant's previous answer when this is a short "yes / do it"."""
+    from app.intent import FOLLOW_UP
+    if FOLLOW_UP.match(message) and len(message.split()) <= 6:
+        earlier = [m["content"] for m in session.memory if m.get("role") == "assistant" and m.get("kind") == "assist"]
+        return message + " " + (earlier[-1] if earlier else "")
+    return message
+
+
+def system_prompt(session: DataSession) -> str:
+    parts = [SYSTEM, LIBRARY_RULES]
+    if session.target_column:
+        target = session.target_column
+        parts.append(f"THE TARGET IS '{target}'.\n"
+                     f"- A new COLUMN (feature) made from '{target}' leaks: a new row won't have its {target}. If asked "
+                     f"for one, propose nothing (not even a step that prepares for it); explain why in a sentence and "
+                     f"offer the safe version.\n"
+                     f"- Using '{target}' to choose which TRAINING rows to drop is fine and common (outliers in "
+                     f"{target} per sqft, rules comparing groups): remove_outliers, drop_rows_where, or a TRAIN_ONLY "
+                     f"change cell. Do those normally.")
+    if not settings.ALLOW_CUSTOM_CODE:
+        parts.append(NO_CODE_RULES)
+    parts.append("BUILT-INS AVAILABLE NOW:\n" + catalogue(session))
+    return "\n\n".join(parts)
 
 
 def cell_kind(code: str) -> str:
@@ -231,25 +465,48 @@ def syntax_error(code: str) -> Optional[str]:
 
 
 async def assist(session: DataSession, message: str) -> Dict[str, Any]:
-    """Answer, or write one cell of code (checked for syntax; one retry if it doesn't parse)."""
+    """Answer, propose a verified built-in step, or write one cell of code.
+
+    A proposed built-in is checked before anyone sees it, and code is checked for syntax; either gets
+    one retry, told exactly what was wrong."""
     history = [{"role": m["role"], "content": m["content"]} for m in session.memory[-8:]
                if m.get("role") in ("user", "assistant") and m.get("kind") == "assist"]
     messages = [*history, {"role": "user", "content": f"{notebook_context(session)}\n\nREQUEST: {message}"}]
-    reply = await complete(SYSTEM, messages)
+    system = system_prompt(session)
+    request = _request_with_context(session, message)
+    reply = await complete(system, messages)
     if reply.get("failed"):
         return {"failed": True, "reply": reply["text"]}
 
-    words, code = split_reply(reply["text"])
-    if code and syntax_error(code):
-        retry = await complete(SYSTEM, [*messages, {"role": "assistant", "content": reply["text"]},
-                                        {"role": "user", "content": f"That code has a syntax error ({syntax_error(code)}). "
-                                                                    "Send the corrected cell."}])
+    answer = read_reply(session, reply["text"], request)
+    if answer.get("code") and not answer.get("problem"):
+        answer["code_problem"] = code_problem(session, answer["code"])
+    trouble = (f"That step can't be used: {answer['problem']}. Send a corrected ```step block, or a ```python "
+               "cell if no built-in fits." if answer.get("problem")
+               else f"That code has {answer['code_problem']}. Send the corrected cell."
+               if answer.get("code_problem") else None)
+    if trouble:
+        retry = await complete(system, [*messages, {"role": "assistant", "content": reply["text"]},
+                                        {"role": "user", "content": trouble}])
         if not retry.get("failed"):
-            fixed_words, fixed = split_reply(retry["text"])
-            if fixed and not syntax_error(fixed):
-                code, words = fixed, words or fixed_words
-    result = {"reply": words or ("Here's the code. Read it, edit it if you like, then run it." if code else ""),
-              "provider": reply["provider"], "model": reply["model"], "fallback_note": reply.get("fallback_note")}
+            second = read_reply(session, retry["text"], request)
+            if second.get("code") and not second.get("problem"):
+                second["code_problem"] = code_problem(session, second["code"])
+            fixed = second.get("step") or (second.get("code") and not second.get("code_problem"))
+            if fixed:
+                # Its first words described the broken version only if there were none the second time
+                answer = {**second, "words": second["words"] or answer["words"]}
+
+    result = {"provider": reply["provider"], "model": reply["model"], "fallback_note": reply.get("fallback_note")}
+    words = answer["words"]
+    if answer.get("step"):
+        return result | {"reply": words or "There's a built-in step for this.", "step": answer["step"]}
+    if answer.get("problem") and not answer.get("code"):
+        # Still no usable step: say so instead of showing a button that would fail
+        note = f"(I tried to propose a built-in step, but it doesn't fit: {answer['problem']}.)"
+        return result | {"reply": f"{words}\n\n{note}".strip()}
+    code = answer.get("code")
+    result["reply"] = words or ("Here's the code. Read it, edit it if you like, then run it." if code else "")
     if code:
-        result |= {"code": code, "kind": cell_kind(code), "syntax_error": syntax_error(code)}
+        result |= {"code": code, "kind": cell_kind(code), "problem": answer.get("code_problem")}
     return result

@@ -1,6 +1,7 @@
 """Tool registry — maps tool names to handler functions and their schemas."""
 
 import logging
+import math
 from typing import Dict, Callable, Any, List, Optional, Set
 import pandas as pd
 from app.session import DataSession
@@ -95,6 +96,7 @@ def execute_tool(tool_name: str, session: DataSession, args: Dict[str, Any]) -> 
     args = {k: v for k, v in (args or {}).items() if v is not None}
 
     try:
+        args = _typed(tool_name, args)
         return TOOL_REGISTRY[tool_name](session, args)
     except ValueError as e:
         # Our own validation errors (bad column name, test size out of range) are user-facing
@@ -106,6 +108,26 @@ def execute_tool(tool_name: str, session: DataSession, args: Dict[str, Any]) -> 
             "message": f"Something went wrong while running '{tool_name}'. "
                        "The details were logged on the server; try different settings or undo the last step.",
         }
+
+
+def _typed(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Settings in the types the tool expects: "5" -> 5 for numbers, "rf, gb" -> ["rf", "gb"] for lists.
+    Raises ValueError with a plain message for what can't be read ("many" rows)."""
+    properties = TOOL_SPECS[tool_name]["parameters"]["properties"]
+    typed = dict(args)
+    for key, value in args.items():
+        kind = properties.get(key, {}).get("type")
+        if kind in ("integer", "number") and not isinstance(value, bool):
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                number = float("nan")
+            if not math.isfinite(number):
+                raise ValueError(f"'{key}' must be a number (got {value!r}).")
+            typed[key] = int(number) if kind == "integer" and number == int(number) else number
+        elif kind == "array" and isinstance(value, str):
+            typed[key] = [v.strip() for v in value.split(",") if v.strip()]
+    return typed
 
 
 def validate_column(session: DataSession, col: str) -> None:

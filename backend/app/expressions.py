@@ -106,8 +106,9 @@ def _condition(df: pd.DataFrame, text: str) -> Tuple[pd.Series, str]:
     except ValueError as simple_error:
         try:
             return evaluate_condition(df, text), text.strip()
-        except ValueError:
-            raise simple_error from None
+        except ValueError as formula_error:
+            # "Column 'bhk' not found" says more than "use one of > >= <..." when a name is the problem
+            raise (formula_error if str(formula_error).startswith("Column '") else simple_error) from None
 
 
 def _simple_condition(df: pd.DataFrame, text: str) -> Tuple[pd.Series, str]:
@@ -225,7 +226,9 @@ def _prepare(formula: str, columns) -> Tuple[ast.AST, Dict[str, str]]:
         if isinstance(node, ast.Name) and not _is_function_name(tree, node):
             col = names.get(node.id, node.id)
             if col not in columns:
-                raise ValueError(f"Column '{col}' not found. Columns with spaces go in backticks, like `total sqft`.")
+                spaced = next((str(c) for c in columns if " " in str(c)), None)
+                raise ValueError(f"Column '{col}' not found." + (
+                    f" Columns with spaces go in backticks, like `{spaced}`." if spaced else ""))
     return tree, names
 
 
@@ -245,7 +248,9 @@ def evaluate_formula(df: pd.DataFrame, formula: str) -> pd.Series:
         if isinstance(node, ast.Name):
             series = df[names.get(node.id, node.id)]
             if not pd.api.types.is_numeric_dtype(series):
-                raise ValueError(f"'{series.name}' holds text, so it can't be used in a formula. Encode it first.")
+                raise ValueError(f"'{series.name}' holds text, so it can't be used in a formula. Turn it into numbers "
+                                 "first: Clean numeric string for numbers stored as text ('1,200', '2 BHK'), "
+                                 "or encode it if it's categories.")
             return series.astype(float)
         if isinstance(node, ast.UnaryOp):
             return -value(node.operand) if isinstance(node.op, ast.USub) else value(node.operand)

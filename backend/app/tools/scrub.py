@@ -161,7 +161,8 @@ recipe_tool(
 
 recipe_tool(
     "clean_numeric_string",
-    "Strip $, commas and other non-numeric characters from a column and convert it to numeric.",
+    "Turn numbers stored as text into numbers: $1,200 -> 1200, 2 BHK -> 2, ranges 1200 - 1400 -> 1300 (midpoint). "
+    "Words beside the number are dropped, so it doesn't convert units (Sq. Yards stays the number of yards).",
     {"column": COLUMN},
     ["column"],
 )

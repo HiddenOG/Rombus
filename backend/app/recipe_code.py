@@ -55,8 +55,9 @@ def apply(df, learned):
     ends = text.str.extract(r"^\\s*(\\d[\\d,]*\\.?\\d*)\\s*-\\s*(\\d[\\d,]*\\.?\\d*)\\s*$")
     low = pd.to_numeric(ends[0].str.replace(",", ""), errors="coerce")
     high = pd.to_numeric(ends[1].str.replace(",", ""), errors="coerce")
-    # Anything else: keep only digits, dots and minus signs ("$1,200" -> 1200, "2 BHK" -> 2)
-    plain = pd.to_numeric(text.str.replace(r"[^\\d.\\-]", "", regex=True), errors="coerce").where(df[{col!r}].notna())
+    # Anything else: the first number in the text ("$1,200" -> 1200, "2 BHK" -> 2, "188.89Sq. Yards" -> 188.89)
+    first = text.str.extract(r"(-?(?:\\d[\\d,]*)?\\.?\\d+)")[0].str.replace(",", "")
+    plain = pd.to_numeric(first, errors="coerce").where(df[{col!r}].notna())
     is_range = low.notna() & high.notna()
     df[{col!r}] = ((low + high) / 2).where(is_range, plain) if is_range.any() else plain
     return df

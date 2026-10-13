@@ -49,14 +49,38 @@ async def upload_file(file: Optional[UploadFile] = File(None), files: Optional[L
     return await run_in_threadpool(_create_notebook, read, visitor)
 
 
+SEPARATORS = (";", "\t", "|")
+
+
+def _read_csv(contents: bytes) -> pd.DataFrame:
+    """A CSV as people actually save them: UTF-8 (with or without BOM) or Windows/Excel encoding,
+    separated by commas, or semicolons (European Excel), tabs or pipes."""
+    try:
+        text = contents.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = contents.decode("cp1252", errors="replace")  # Excel on Windows: £, é, ü...
+    if "\x00" in text[:10000]:
+        raise ValueError("it isn't a text file (a CSV is text)")
+    df = pd.read_csv(io.StringIO(text))
+    if df.shape[1] == 1:  # one column: maybe it isn't separated by commas
+        header = text.split("\n", 1)[0]
+        best = max(SEPARATORS, key=header.count)
+        if header.count(best):
+            df = pd.read_csv(io.StringIO(text), sep=best)
+    return df
+
+
 def _read_table(name: str, contents: bytes) -> pd.DataFrame:
     try:
         if name.lower().endswith((".xlsx", ".xls")):
-            return pd.read_excel(io.BytesIO(contents))
-        return pd.read_csv(io.BytesIO(contents))
+            df = pd.read_excel(io.BytesIO(contents))
+        else:
+            df = _read_csv(contents)
     except Exception as e:
         reason = str(e).splitlines()[0][:200] if str(e) else type(e).__name__
         raise HTTPException(status_code=400, detail=f"Couldn't read '{name}' as a table: {reason}")
+    df.columns = [str(c) for c in df.columns]  # Excel headers like 2024 come in as numbers
+    return df
 
 
 def _create_notebook(read: List[Tuple[str, bytes]], visitor: str):

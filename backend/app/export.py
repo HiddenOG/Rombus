@@ -32,6 +32,52 @@ def to_file(df: pd.DataFrame, fmt: str) -> Tuple[bytes, str]:
     return df.to_csv(index=False).encode("utf-8"), "text/csv"
 
 
+# Reading the data exactly as the upload did: any common encoding and separator, several files
+# stacked with a `source_file` column
+LOAD_CODE = '''
+
+# ── Reading the data (as Rhombus read it) ──────────────────────────────────────
+
+def read_table(path):
+    if not path.lower().endswith(".csv"):
+        df = pd.read_excel(path)
+    else:
+        raw = open(path, "rb").read()
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("cp1252", errors="replace")
+        df = pd.read_csv(io.StringIO(text))
+        if df.shape[1] == 1:  # separated by something other than commas?
+            header = text.split("\\n", 1)[0]
+            sep = max([";", "\\t", "|"], key=header.count)
+            if header.count(sep):
+                df = pd.read_csv(io.StringIO(text), sep=sep)
+    df.columns = [str(c) for c in df.columns]
+    return df
+
+
+def load(paths):
+    """One file, or several stacked (rows one after the other) with a source_file column."""
+    if len(paths) == 1:
+        return read_table(paths[0])
+    return pd.concat([read_table(p).assign(source_file=os.path.splitext(os.path.basename(p))[0]) for p in paths],
+                     ignore_index=True)
+'''
+
+
+def _data_files(session: DataSession) -> list:
+    """The file(s) the notebook was made from, as the script's default arguments."""
+    if " + " in session.filename and "source_file" in session.original_df:
+        return [f"{s}.csv" for s in session.original_df["source_file"].dropna().unique()]
+    return [session.filename]
+
+
+def _run_line(session: DataSession, stem: str) -> str:
+    files = " ".join(f'"{f}"' if " " in f else f for f in _data_files(session))
+    return f"Run:  python {stem}_pipeline.py {files}"
+
+
 def _numbered(code: str, n: int) -> str:
     """Rename a step's learn/apply (and TRAIN_ONLY) so many steps can live in one file."""
     code = re.sub(r"^\s*import (numpy|pandas).*\n", "", code, flags=re.M)
@@ -69,15 +115,17 @@ Every step has two parts:
   learn(train)         looks at the TRAINING rows only and returns what it needs (the "sticky note")
   apply(df, learned)   uses only that sticky note, so test rows and new data are never learned from
 
-Run:  python {re.sub(r"[^A-Za-z0-9_.-]", "_", session.filename.rsplit(".", 1)[0])}_pipeline.py
+{_run_line(session, re.sub(r"[^A-Za-z0-9_.-]", "_", session.filename.rsplit(".", 1)[0]))}
 """
 
+import io
+import os
 import sys
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-''']
+''' + LOAD_CODE]
 
     for n, line in enumerate(steps, 1):
         kind = STEP_TYPES[line.tool].kind
@@ -118,8 +166,8 @@ def apply_recipe(df, notes):
     return df
 
 
-def main(path={session.filename!r}):
-    df = pd.read_csv(path) if path.endswith(".csv") else pd.read_excel(path)
+def main(*paths):
+    df = load(paths or {tuple(_data_files(session))!r})
     df = df.dropna(subset=[{target!r}])
     if df[{target!r}].dtype.kind == "f" and (df[{target!r}] == df[{target!r}].round()).all():
         df[{target!r}] = df[{target!r}].astype("int64")  # 0.0/1.0 back to 0/1 once the blanks are gone
@@ -150,14 +198,16 @@ Dataset: {session.filename}
 Steps:   {len(steps)} ({", ".join(l.tool for l in steps) or "none"})
 
 There's no model, so every step runs on all the rows, in order.
-Run:  python {stem}_pipeline.py
+{_run_line(session, stem)}
 """
 
+import io
+import os
 import sys
 
 import numpy as np
 import pandas as pd
-''']
+''' + LOAD_CODE]
     for n, line in enumerate(steps, 1):
         parts.append(f"\n# ── Step {n}: {line.tool.replace('_', ' ')} " + "─" * 20 + "\n\n"
                      + _numbered(step_code(line, None, with_learned=False), n))
@@ -171,8 +221,8 @@ def clean(df):
     return df
 
 
-def main(path={session.filename!r}):
-    df = pd.read_csv(path) if path.endswith(".csv") else pd.read_excel(path)
+def main(*paths):
+    df = load(paths or {tuple(_data_files(session))!r})
     cleaned = clean(df)
     cleaned.to_csv({stem + "_clean.csv"!r}, index=False)
     print(f"Saved {stem}_clean.csv ({{len(cleaned)}} rows)")

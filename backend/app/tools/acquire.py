@@ -24,6 +24,20 @@ def parse_test_size(value: Any) -> float:
     return size
 
 
+MAX_CLASSES = 20
+
+
+def problem_type_of(target: pd.Series) -> str:
+    """Classification for categories and a few repeated whole numbers; regression for amounts.
+    A handful of distinct numbers isn't enough: 10 prices in a 10-row file are still amounts."""
+    values = target.dropna()
+    if not pd.api.types.is_numeric_dtype(values) or pd.api.types.is_bool_dtype(values):
+        return "classification"
+    distinct = values.nunique()
+    whole = bool((values % 1 == 0).all())
+    return "classification" if whole and distinct < MAX_CLASSES and distinct <= len(values) / 2 else "regression"
+
+
 @register_tool(
     "select_target",
     "Set the target/label column to predict and lock away a share of rows as the final test set. "
@@ -70,8 +84,7 @@ def select_target(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
 
     previous = (session.target_column, session.problem_type, session.time_column)
     session.target_column, session.time_column = col, time_column
-    nunique = session.original_df[col].nunique()
-    session.problem_type = "classification" if nunique < 20 else "regression"
+    session.problem_type = problem_type_of(session.original_df[col])
     # Re-locking replays the existing recipe on the new training rows
     try:
         dropped = session.lock_test_rows(test_size)
@@ -84,7 +97,7 @@ def select_target(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
 
     which = f"the most recent {len(session.test_df)} rows by '{time_column}'" if time_column else f"{len(session.test_df)} rows"
     msg = (
-        f"Target set to '{col}' ({session.problem_type}, {nunique} unique values). "
+        f"Target set to '{col}' ({session.problem_type}, {session.original_df[col].nunique()} unique values). "
         f"Locked away {which} ({test_size:.0%}) as the final test set; "
         f"working with {len(session.df)} training rows."
     )

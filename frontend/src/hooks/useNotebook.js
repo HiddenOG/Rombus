@@ -187,12 +187,14 @@ export function useNotebook() {
             patchCell(id, {
                 status: data.failed ? 'error' : 'done',
                 reply: data.reply,
+                // A built-in step from the verified library: a Run card, not code
+                suggestions: data.step ? [{ ...data.step, verified: true }] : undefined,
                 provider: data.provider,
                 model: data.model,
                 fallbackNote: data.fallback_note,
             });
             if (data.code) {
-                addCell({ type: 'code', kind: data.kind, source: data.code, byAi: true, from: id, syntaxError: data.syntax_error || null });
+                addCell({ type: 'code', kind: data.kind, source: data.code, byAi: true, from: id, problem: data.problem || null });
             }
         } catch (err) {
             patchCell(id, { status: 'error', reply: err.message });
