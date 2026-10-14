@@ -98,3 +98,22 @@ def test_supabase_urls_use_the_psycopg_driver(monkeypatch):
 def test_passwords_with_special_characters(monkeypatch, password, encoded):
     monkeypatch.setattr(settings, "DATABASE_URL", f"postgresql://postgres.abc:{password}@aws-0.pooler.supabase.com:5432/postgres")
     assert database_url() == f"postgresql+psycopg://postgres.abc:{encoded}@aws-0.pooler.supabase.com:5432/postgres"
+
+
+@pytest.mark.parametrize("pasted", [
+    # How the URL arrives from dashboards (Railway's value box) and copy-paste
+    "DATABASE_URL=postgresql://postgres.abc:my#pass@aws-0.pooler.supabase.com:5432/postgres",
+    ' "postgresql://postgres.abc:my#pass@aws-0.pooler.supabase.com:5432/postgres" ',
+    "postgresql+psycopg://postgres.abc:my#pass@aws-0.pooler.supabase.com:5432/postgres",
+    "postgres://postgres.abc:my#pass@aws-0.pooler.supabase.com:5432/postgres",
+])
+def test_urls_as_pasted_into_dashboards(monkeypatch, pasted):
+    monkeypatch.setattr(settings, "DATABASE_URL", pasted)
+    assert database_url() == "postgresql+psycopg://postgres.abc:my%23pass@aws-0.pooler.supabase.com:5432/postgres"
+
+
+def test_a_bad_url_never_shows_the_password():
+    from app.storage import Database
+    with pytest.raises(RuntimeError) as error:
+        Database("postgresql+psycopg://user:secret#pw@host:notaport/db")
+    assert "secret" not in str(error.value) and "DATABASE_URL isn't a valid" in str(error.value)

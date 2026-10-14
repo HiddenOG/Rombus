@@ -56,9 +56,12 @@ logger = logging.getLogger(__name__)
 def database_url() -> str:
     """DATABASE_URL if set, otherwise a SQLite file inside DATA_DIR.
     Supabase hands out plain "postgresql://" URLs; we talk to them with the psycopg driver."""
-    url = settings.DATABASE_URL.strip().strip("\"'")
-    if url.startswith(("postgresql://", "postgres://")):
-        url = "postgresql+psycopg://" + _encode_password(url.split("://", 1)[1])
+    url = settings.DATABASE_URL.strip().strip("\"'").strip()
+    if url.upper().startswith("DATABASE_URL="):  # the whole .env line pasted into a dashboard's value box
+        url = url.split("=", 1)[1].strip().strip("\"'").strip()
+    scheme, sep, rest = url.partition("://")
+    if sep and scheme.lower() in ("postgresql", "postgres", "postgresql+psycopg"):
+        url = "postgresql+psycopg://" + _encode_password(rest)
     return url or f"sqlite:///{os.path.join(settings.DATA_DIR, 'sessions.db')}"
 
 
@@ -82,7 +85,14 @@ class Database:
 
     def __init__(self, url: str):
         # pre_ping: a cloud database drops idle connections; check before use instead of failing
-        self.engine = create_engine(url, future=True, pool_pre_ping=True)
+        try:
+            self.engine = create_engine(url, future=True, pool_pre_ping=True)
+        except Exception:
+            # Never show the URL: it holds the database password, and errors end up in logs
+            raise RuntimeError(
+                "DATABASE_URL isn't a valid database address. It should look like "
+                "postgresql://USER:PASSWORD@HOST:5432/postgres (Supabase: Connect > Session pooler), "
+                "with nothing before it: no quotes, spaces or 'DATABASE_URL='.") from None
         for attempt, wait in enumerate((*self.RETRY_SECONDS, None), start=1):
             try:
                 metadata.create_all(self.engine)
