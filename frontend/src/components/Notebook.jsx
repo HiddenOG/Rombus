@@ -171,6 +171,7 @@ function CommandBar({ nb }) {
                                 disabled={isProcessing}
                             />
                         </div>
+                        <HeaderRow summary={summary} onApply={nb.setHeaderRow} disabled={isProcessing} />
                     </div>
                 )}
 
@@ -277,6 +278,58 @@ function CommandBar({ nb }) {
                 </div>
             </div>
         </div>
+    );
+}
+
+/**
+ * HeaderRow — "the column names are on row N" for spreadsheets with a title above the table. Counted
+ * the way Excel numbers rows. Stands out when most names came out empty (Unnamed: 1, Unnamed: 2…).
+ */
+function HeaderRow({ summary, onApply, disabled }) {
+    const [row, setRow] = useState('');
+    const names = summary?.columns?.map(c => String(c.name)) ?? [];
+    const unnamed = names.filter(n => /^Unnamed: \d+$/.test(n)).length;
+    const suspicious = names.length > 1 && unnamed >= names.length / 2;
+    const apply = (e) => {
+        e.preventDefault();
+        const n = Number(row);
+        if (Number.isInteger(n) && n >= 1 && n <= 50) onApply(n);
+    };
+
+    return (
+        <form
+            onSubmit={apply}
+            className={`mt-2.5 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs ${
+                suspicious ? 'border border-amber-200 bg-amber-50 text-amber-900' : 'text-ink-3'
+            }`}
+        >
+            <span className="min-w-0 flex-1 basis-56">
+                {suspicious
+                    ? `${unnamed} of ${names.length} column names came out empty (Unnamed: 1…). If your sheet has a title above the table, say which row holds the real names.`
+                    : 'Column names on another row (a title above the table)?'}
+            </span>
+            <label className="flex items-center gap-1.5">
+                Row
+                <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    inputMode="numeric"
+                    value={row}
+                    onChange={e => setRow(e.target.value)}
+                    placeholder="4"
+                    aria-label="Spreadsheet row that holds the column names"
+                    className="w-16 rounded-lg border border-line bg-surface px-2 py-1 text-ink outline-none focus:border-brand-400"
+                />
+            </label>
+            <button
+                type="submit"
+                disabled={disabled || !row}
+                className="rounded-lg border border-line bg-surface px-2.5 py-1 font-semibold text-ink-2 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
+            >
+                Use row
+            </button>
+        </form>
     );
 }
 

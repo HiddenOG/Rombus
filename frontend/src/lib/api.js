@@ -211,6 +211,11 @@ export async function moveStep(sessionId, stepId, direction) {
     });
 }
 
+/** The column names are on another spreadsheet row (1 = the first line). Only before work starts. */
+export async function setHeaderRow(sessionId, row) {
+    return apiRequest(`/api/session/${sessionId}/header`, { method: 'POST', body: JSON.stringify({ row }) });
+}
+
 export async function restartSession(sessionId) {
     return apiRequest(`/api/session/${sessionId}/restart`, { method: 'POST' });
 }

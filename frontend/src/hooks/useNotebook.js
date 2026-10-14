@@ -373,6 +373,13 @@ export function useNotebook() {
     // test rows), and one-off actions
     const NO_AUTO_RERUN = new Set(['select_target', 'clean_only', 'final_exam', 'undo', 'save_model', 'transition_stage']);
 
+    // The column names are on another row of the spreadsheet (a title above the table)
+    const setHeaderRow = (row) => busy(async () => {
+        const data = await api.setHeaderRow(sessionId, row);
+        setSummary(data.new_state_summary);
+        addCell({ type: 'note', text: data.message });
+    });
+
     const restart = () => busy(async () => {
         const data = await api.restartSession(sessionId);
         setSummary(data.new_state_summary);
@@ -429,6 +436,7 @@ export function useNotebook() {
         editAction,
         moveCell,
         restart,
+        setHeaderRow,
         runAll,
         clearOutputs,
         deleteCell,

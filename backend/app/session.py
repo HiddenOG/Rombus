@@ -271,6 +271,19 @@ class DataSession:
         (no model will ever be scored on these rows, so there's nothing for them to leak into)."""
         return self.is_split or self.clean_only
 
+    def set_header_row(self, row: int) -> str:
+        """Take the column names from another row of the uploaded table (see app/tables.py). Only
+        before any work starts: every step, the lock and the export refer to these names."""
+        from app.tables import header_from_row
+        if self.is_split or self.clean_only or self.recipe:
+            raise ValueError("The column names can only be changed before you choose what to do with the data "
+                             "(predict a column, or clean only). Upload the file again to start over.")
+        table = header_from_row(self.original_df, row)
+        self.original_df, self.df = table, table.copy()
+        self.updated_at = time.time()
+        shown = ", ".join(str(c) for c in table.columns[:6]) + ("…" if table.shape[1] > 6 else "")
+        return f"Column names taken from row {row}: {shown}. The table now has {table.shape[0]} rows and {table.shape[1]} columns."
+
     def start_clean_only(self) -> None:
         """Work on all the rows, without a target or a model."""
         if self.is_split:

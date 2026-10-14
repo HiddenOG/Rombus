@@ -68,6 +68,61 @@ def test_an_excel_sheet_with_mixed_columns_uploads(client):
     assert shown["success"]
 
 
+def test_any_table_can_be_saved():
+    """Whatever is in the cells, saving a copy to storage doesn't crash."""
+    import datetime
+    import decimal
+    import io as _io
+    from app.storage import parquet_bytes
+    nasty = pd.DataFrame({
+        "mixed": ["S/N", 1, 2.5, None], "lists": [[1, 2], [3], None, []], "complex": [1 + 2j, 3j, 0j, 1j],
+        "bytes": [b"\x00", b"x", None, b""], "times": [datetime.time(9, 30), None, datetime.time(1), None],
+        "decimals": [decimal.Decimal("1.1"), None, decimal.Decimal("2"), None], "empty": [None] * 4,
+        "dates_and_text": [datetime.datetime(2024, 1, 1), "TBC", None, datetime.datetime(2025, 1, 1)],
+    })
+    nasty.columns = [*nasty.columns[:-1], "mixed"]  # and a repeated column name
+    back = pd.read_parquet(_io.BytesIO(parquet_bytes(nasty)))
+    assert back.shape == (4, 8) and list(back.columns[-1:]) == ["mixed.1"]
+
+
+def _quote_sheet():
+    """Like a real priced quote: a title, a blank line, a date, then the table from row 4."""
+    import io as _io
+    rows = [["PRICED QUOTE - RFQ 0033118", None, None, None],
+            [None, None, None, None],
+            ["Date: 14 Oct 2026", None, None, None],
+            ["S/N", "Description", "Qty", "Unit price"],
+            [1, "Pipe 6in", 10, "1,250.50"],
+            [2, "Elbow 90", 4, "310"],
+            [3, "Flange", 2, "95.75"]]
+    buffer = _io.BytesIO()
+    pd.DataFrame(rows).to_excel(buffer, index=False, header=False)
+    return buffer.getvalue()
+
+
+def test_column_names_from_a_lower_row(client):
+    sid = upload(client, "quote.xlsx", _quote_sheet()).json()["session_id"]
+    r = client.post(f"/api/session/{sid}/header", json={"row": 4})
+    assert r.status_code == 200, r.text
+    columns = {c["name"]: c["dtype"] for c in r.json()["new_state_summary"]["columns"]}
+    assert list(columns) == ["S/N", "Description", "Qty", "Unit price"]
+    assert columns["Qty"] == "int64" and columns["Unit price"] == "float64"  # numbers again, 1,250.50 included
+    assert r.json()["new_state_summary"]["shape"] == [3, 4]
+    # It stays that way after the notebook is reloaded from storage
+    from app.session import session_manager
+    session_manager._sessions.pop(sid, None)
+    again = client.get(f"/api/session/{sid}").json()["summary"]
+    assert [c["name"] for c in again["columns"]] == ["S/N", "Description", "Qty", "Unit price"]
+
+
+def test_column_names_only_before_work_starts(client):
+    sid = upload(client, "quote.xlsx", _quote_sheet()).json()["session_id"]
+    client.post("/api/action", json={"session_id": sid, "tool": "clean_only", "arguments": {}})
+    r = client.post(f"/api/session/{sid}/header", json={"row": 4})
+    assert r.status_code == 400 and "before you choose" in r.json()["detail"]
+    assert client.post(f"/api/session/{sid}/header", json={"row": 99}).status_code == 422
+
+
 def test_unexpected_errors_still_reach_the_browser(client, monkeypatch):
     """A crash comes back as a readable 500 with CORS headers, not as 'cannot connect'."""
     from app.routers import upload as upload_router

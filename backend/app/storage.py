@@ -94,14 +94,40 @@ def one_type_per_column(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def parquet_bytes(df: pd.DataFrame) -> bytes:
-    """A table as Parquet. A column that still mixes types is stored as text instead of crashing the save."""
-    buffer = io.BytesIO()
-    try:
-        df.to_parquet(buffer, index=False)
-    except Exception:
-        buffer = io.BytesIO()
-        one_type_per_column(df).to_parquet(buffer, index=False)
-    return buffer.getvalue()
+    """A table as Parquet, whatever is in it. Tries, in order: as it is; with mixed-type columns made
+    one type; and finally with every column Parquet still can't hold stored as text (lists, dicts,
+    complex numbers, bytes...). A save never crashes over what's in a cell."""
+    df = df.copy()
+    df.columns = _unique_names([str(c) for c in df.columns])  # Parquet needs distinct text names
+    for attempt in (lambda d: d, one_type_per_column, _as_text_where_needed):
+        try:
+            buffer = io.BytesIO()
+            attempt(df).to_parquet(buffer, index=False)
+            return buffer.getvalue()
+        except Exception:
+            continue
+    raise ValueError("This table can't be saved: some of its values can't be stored.")
+
+
+def _as_text_where_needed(df: pd.DataFrame) -> pd.DataFrame:
+    import pyarrow as pa
+    out = one_type_per_column(df)
+    for col in out.columns:
+        try:
+            pa.array(out[col], from_pandas=True)
+        except Exception:
+            out[col] = out[col].map(lambda v: v if v is None or (isinstance(v, float) and v != v) else str(v))
+    return out
+
+
+def _unique_names(names: List[str]) -> List[str]:
+    seen: Dict[str, int] = {}
+    out = []
+    for name in names:
+        count = seen.get(name, 0)
+        seen[name] = count + 1
+        out.append(name if count == 0 else f"{name}.{count}")
+    return out
 
 
 class Database:

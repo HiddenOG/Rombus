@@ -196,6 +196,16 @@ async def move_step(session_id: str, step_id: str, body: Move, visitor: str = De
     return await _change(session_id, visitor, change)
 
 
+class HeaderRow(BaseModel):
+    row: int = Field(ge=1, le=50)
+
+
+@router.post("/session/{session_id}/header")
+async def set_header_row(session_id: str, body: HeaderRow, visitor: str = Depends(current_owner)):
+    """The column names are on another row of the spreadsheet (a title above the table)."""
+    return await _change(session_id, visitor, lambda session: session.set_header_row(body.row))
+
+
 @router.post("/session/{session_id}/restart")
 async def restart(session_id: str, visitor: str = Depends(current_owner)):
     """Restart, Jupyter-style: clear trained models and the AI's memory; rebuild the data from scratch."""
