@@ -4,7 +4,15 @@
 
 import { accessToken } from './supabase';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+/** The backend's address as typed in a dashboard, made usable: "api.example.com/" -> "https://api.example.com".
+ *  (Without https:// the browser would read it as a page on this site, which answers with the website.) */
+export function backendAddress(value) {
+    let url = (value || 'http://localhost:8000').trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//i.test(url)) url = `${/^(localhost|127\.)/.test(url) ? 'http' : 'https'}://${url}`;
+    return url;
+}
+
+const API_URL = backendAddress(import.meta.env.VITE_API_URL);
 
 /**
  * This browser's visitor id: random and unguessable, made once and kept in localStorage.
@@ -63,6 +71,12 @@ async function apiRequest(endpoint, options = {}) {
 
     try {
         const response = await fetch(url, { ...options, headers });
+        const isJson = (response.headers.get('content-type') || '').includes('application/json');
+        if (response.ok && !isJson) {
+            // A web page where data was expected: the address isn't the Rhombus backend
+            throw new Error(`The backend address (${API_URL}) answered with a web page, not the Rhombus API. ` +
+                'Set VITE_API_URL to the backend service\'s domain and redeploy the frontend.');
+        }
         const data = await response.json().catch(() => ({}));
 
         if (!response.ok) {
