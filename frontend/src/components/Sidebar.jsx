@@ -10,14 +10,25 @@ import { AccountPanel } from './AccountPanel';
 export function Sidebar({ open, onClose, sessionId, summary, onFileUpload, isProcessing, notebooks = [], onOpenNotebook, onNewNotebook, onDeleteNotebook, account }) {
     return (
         <>
-            {/* Phones/tablets: the sidebar is a drawer over the page, with a dimmed backdrop */}
-            {open && <div className="fixed inset-0 z-30 bg-ink/30 lg:hidden" onClick={onClose} aria-hidden="true" />}
+            {/* Phones/tablets: the sidebar is a drawer over the page, with a backdrop that fades in and out */}
+            <div
+                className={`fixed inset-0 z-30 bg-ink/30 transition-opacity duration-500 ease-in-out motion-reduce:transition-none lg:hidden ${
+                    open ? 'opacity-100' : 'pointer-events-none opacity-0'
+                }`}
+                onClick={onClose}
+                aria-hidden="true"
+            />
+            {/* Opening and closing glide: phones slide the drawer in and out; computers shrink the column's
+                width to nothing while the notebook widens into the space. The contents keep their width
+                (they're clipped, not squeezed), and a closed sidebar can't be tabbed into (inert). */}
             <aside
                 aria-label="Notebooks and dataset"
-                className={`fixed inset-y-0 left-0 z-40 flex w-[85vw] max-w-80 shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-transform duration-200 lg:static lg:z-auto lg:w-80 ${
-                    open ? 'translate-x-0' : '-translate-x-full lg:hidden'
+                inert={!open}
+                className={`fixed inset-y-0 left-0 z-40 shrink-0 overflow-hidden bg-surface transition-[transform,width] duration-500 ease-in-out motion-reduce:transition-none lg:static lg:z-auto lg:translate-x-0 ${
+                    open ? 'translate-x-0 lg:w-80' : '-translate-x-full lg:w-0'
                 }`}
             >
+            <div className="flex h-full w-[85vw] max-w-80 flex-col border-r border-line lg:w-80">
             {/* Brand */}
             <div className="shrink-0 h-16 px-5 flex items-center gap-3 border-b border-line">
                 <Logo size={36} className="drop-shadow-sm" />
@@ -49,6 +60,7 @@ export function Sidebar({ open, onClose, sessionId, summary, onFileUpload, isPro
                 )}
             </div>
             <AccountPanel account={account} />
+            </div>
             </aside>
         </>
     );
