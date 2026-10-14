@@ -151,8 +151,12 @@ def _is_column_setting(tool: str, key: str, prop: Dict[str, Any]) -> bool:
     return described or key in COLUMN_SETTINGS or (tool, key) in COLUMN_SETTINGS_FOR
 
 
-def check_step(session: DataSession, step: Any, request: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def check_step(session: DataSession, step: Any, request: str,
+               work: Optional[Dict[str, Any]] = None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Check a proposed built-in before anyone sees it: (step, None) when it's sound, else (None, why).
+
+    `work` carries the rows as earlier proposed steps in the same answer left them ({"df": ...}),
+    so a second step may use what the first one makes; a passing step updates it.
 
     The tool must be in the library now, settings known, required ones present, choices valid, column
     names real, conditions and formulas readable, and judgement steps only when they were asked for."""
@@ -178,7 +182,8 @@ def check_step(session: DataSession, step: Any, request: str) -> Tuple[Optional[
     if missing:
         return None, f"{tool} needs {', '.join(missing)}"
 
-    columns = [str(c) for c in session.df.columns]
+    rows = (work or {}).get("df", session.df)
+    columns = [str(c) for c in rows.columns]
     for key, value in args.items():
         prop = params["properties"][key]
         enum = prop.get("enum") or (prop.get("items") or {}).get("enum")
@@ -201,9 +206,11 @@ def check_step(session: DataSession, step: Any, request: str) -> Tuple[Optional[
             # using the target, an unknown column in a condition, a one-hot too big) is caught here
             if tool == "time_feature" and not args.get("order_by") and session.time_column:
                 args["order_by"] = session.time_column
-            run_line(Line(tool, dict(args)), session.df.copy(), session.ctx)
+            after = run_line(Line(tool, dict(args)), rows.copy(), session.ctx)
+            if work is not None:
+                work["next"] = after
         elif tool == "filter_rows":
-            parse_filter(session.df.head(200), str(args["conditions"]))
+            parse_filter(rows.head(200), str(args["conditions"]))
     except ValueError as e:
         return None, str(e)
     except Exception:
@@ -447,16 +454,18 @@ def split_reply(text: str) -> Tuple[str, Optional[str]]:
     return words, match.group(1).strip("\n")
 
 
-def split_step(text: str) -> Tuple[str, Any]:
-    """(the words without the step block, the parsed step, or the raw text if it isn't JSON, or None)."""
-    match = _STEP_BLOCK.search(text or "")
-    if not match:
-        return text or "", None
-    words = (text[:match.start()] + text[match.end():]).strip()
-    try:
-        return words, json.loads(match.group(1))
-    except ValueError:
-        return words, match.group(1)
+MAX_STEPS = 3  # built-in steps in one answer (e.g. Yes -> Y, then No -> N)
+
+
+def split_steps(text: str) -> Tuple[str, List[Any]]:
+    """(the words without the step blocks, each step parsed, or its raw text if it isn't JSON)."""
+    steps = []
+    for match in _STEP_BLOCK.finditer(text or ""):
+        try:
+            steps.append(json.loads(match.group(1)))
+        except ValueError:
+            steps.append(match.group(1))
+    return _STEP_BLOCK.sub("", text or "").strip(), steps
 
 
 # Enough rows to meet the odd values ("188.89Sq. Yards" sat past row 2,000 in the Bengaluru data)
@@ -488,16 +497,28 @@ def code_problem(session: DataSession, code: str) -> Optional[str]:
 
 
 def read_reply(session: DataSession, text: str, request: str) -> Dict[str, Any]:
-    """What an answer holds: words, and a checked built-in step OR a code cell.
-    {"words", "step"?, "code"?, "problem"?}: problem is why a proposed step can't be used."""
-    words, step = split_step(text)
+    """What an answer holds: words, and checked built-in steps OR a code cell.
+    {"words", "steps"?, "code"?, "problem"?}: problem is why a proposed step can't be used.
+    Several steps are checked in order, each on the rows as the ones before it leave them."""
+    words, proposed = split_steps(text)
     words, code = split_reply(words)
-    if step is None:
+    if not proposed:
         return {"words": words, "code": code}
-    checked, problem = check_step(session, step, request)
-    if checked:
-        return {"words": words, "step": checked}  # the verified step wins over any code alongside it
-    return {"words": words, "code": code, "problem": problem}
+    work, steps, problems = {"df": session.df}, [], []
+    for step in proposed[:MAX_STEPS]:
+        checked, problem = check_step(session, step, request, work)
+        if checked:
+            steps.append(checked)
+            work["df"] = work.pop("next", work["df"])
+        else:
+            work.pop("next", None)
+            problems.append(problem)
+    if steps:  # verified steps win over any code alongside them
+        answer = {"words": words, "steps": steps}
+        if problems:
+            answer["skipped"] = problems
+        return answer
+    return {"words": words, "code": code, "problem": problems[0]}
 
 
 def examine(session: DataSession, text: str, request: str) -> Dict[str, Any]:
@@ -523,6 +544,11 @@ def _request_with_context(session: DataSession, message: str) -> str:
 
 def system_prompt(session: DataSession) -> str:
     parts = [SYSTEM, LIBRARY_RULES]
+    if session.clean_only:
+        parts.append("THIS NOTEBOOK ONLY CLEANS DATA: no target, no test rows, no models. Never write a MODELS "
+                     "cell or suggest training; every step and CHANGE cell works on ALL the rows (no TRAIN_ONLY "
+                     "needed). If they want a model, say they can choose the column to predict with select_target, "
+                     "and their cleaning steps carry over.")
     if session.target_column:
         target = session.target_column
         parts.append(f"THE TARGET IS '{target}'.\n"
@@ -583,15 +609,20 @@ async def assist(session: DataSession, message: str) -> Dict[str, Any]:
                                         {"role": "user", "content": trouble}])
         if not retry.get("failed"):
             second = await run_exclusive(session.session_id, examine, session, retry["text"], request)
-            fixed = second.get("step") or (second.get("code") and not second.get("code_problem"))
+            fixed = second.get("steps") or (second.get("code") and not second.get("code_problem"))
             if fixed:
                 # Its first words described the broken version only if there were none the second time
                 answer = {**second, "words": second["words"] or answer["words"]}
 
     result = {"provider": reply["provider"], "model": reply["model"], "fallback_note": reply.get("fallback_note")}
     words = answer["words"]
-    if answer.get("step"):
-        return result | {"reply": words or "There's a built-in step for this.", "step": answer["step"]}
+    if answer.get("steps"):
+        steps = answer["steps"]
+        named = ", then ".join(s["tool"].replace("_", " ") for s in steps)
+        reply = words or f"Built-in step{'s' if len(steps) > 1 else ''}: {named}."
+        if answer.get("skipped"):
+            reply += f"\n\n(Another step I proposed doesn't fit: {answer['skipped'][0]}.)"
+        return result | {"reply": reply, "steps": steps, "step": steps[0]}
     if answer.get("problem") and not answer.get("code"):
         # Still no usable step: say so instead of showing a button that would fail
         note = f"(I tried to propose a built-in step, but it doesn't fit: {answer['problem']}.)"

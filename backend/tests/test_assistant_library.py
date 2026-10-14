@@ -122,7 +122,41 @@ def test_a_good_step_comes_back_clean(session):
 def test_a_step_block_on_one_line(session):
     text = 'Shows them. ```step {"tool": "show_unique_values", "arguments": {"column": "location"}}```'
     answer = read_reply(session, text, "values of location")
-    assert answer["step"]["tool"] == "show_unique_values" and answer["words"] == "Shows them."
+    assert answer["steps"][0]["tool"] == "show_unique_values" and answer["words"] == "Shows them."
+
+
+def test_several_steps_are_checked_in_order(session):
+    """Yes -> Y then No -> N is two steps; a later step may use a column an earlier one makes."""
+    text = ("Two steps.\n```step\n" + json.dumps({"tool": "add_column", "arguments": {"name": "sqft_per_bath", "formula": "total_sqft / bath"}})
+            + "\n```\n```step\n" + json.dumps({"tool": "plot_histogram", "arguments": {"column": "sqft_per_bath"}})
+            + "\n```\n```step\n" + json.dumps({"tool": "plot_histogram", "arguments": {"column": "nope"}}) + "\n```")
+    answer = read_reply(session, text, "add a sqft per bath feature and show its histogram")
+    assert [s["tool"] for s in answer["steps"]] == ["add_column", "plot_histogram"]
+    assert "no column named nope" in answer["skipped"][0] and "sqft_per_bath" not in session.df
+
+
+def test_several_steps_reach_the_notebook_and_its_memory(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "DATA_DIR", str(tmp_path))
+    two = "\n".join(f"```step\n{json.dumps({'tool': 'replace_values', 'arguments': {'column': 'paid', 'find': a, 'replace_with': b}})}\n```"
+                    for a, b in (("Yes", "Y"), ("No", "N")))
+    sent = fake_ai(monkeypatch, two, "Done.")
+    with TestClient(app, headers=H) as client:
+        csv = "paid,x\n" + "\n".join(f"{'Yes' if i % 2 else 'No'},{i}" for i in range(20))
+        sid = client.post("/api/upload", files={"file": ("p.csv", csv.encode())}).json()["session_id"]
+        client.post("/api/action", json={"session_id": sid, "tool": "clean_only", "arguments": {}})
+        r = client.post("/api/assist", json={"session_id": sid, "message": "turn Yes into Y and No into N in paid"}).json()
+        assert [s["arguments"]["find"] for s in r["steps"]] == ["Yes", "No"]
+        assert r["reply"] == "Built-in steps: replace values, then replace values."
+        client.post("/api/assist", json={"session_id": sid, "message": "thanks"})
+        assert sent[1]["messages"][-2]["content"].count("```step") == 2  # both remembered
+
+
+def test_clean_only_notebooks_are_told_there_are_no_models():
+    s = DataSession(pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]}), "c.csv")
+    assert execute_tool("clean_only", s, {})["success"]
+    prompt = system_prompt(s)
+    assert "ONLY CLEANS DATA" in prompt and "train_models" not in catalogue(s)
+    assert "replace_values(" in catalogue(s)
 
 
 def test_settings_beside_the_tool_name_still_count(session):
@@ -134,7 +168,7 @@ def test_settings_beside_the_tool_name_still_count(session):
 def test_a_step_wins_over_code_in_the_same_answer(session):
     text = step("impute_missing", column="bath", strategy="median") + "\n```python\nresult = train\n```"
     answer = read_reply(session, text, "fill the blanks in bath with the median")
-    assert answer["step"]["tool"] == "impute_missing" and "code" not in answer
+    assert answer["steps"][0]["tool"] == "impute_missing" and "code" not in answer
 
 
 # ── The whole exchange ───────────────────────────────────────────────────────

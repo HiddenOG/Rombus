@@ -59,6 +59,16 @@ def test_the_notebooks_cleaning(session):
     assert "Yes" not in set(session.df["Do_Not_Contact"]) and session.df["Phone_Number"].notna().all()
 
 
+def test_messages_speak_of_rows_not_training_rows(session):
+    """There are no training or test rows here, so the steps don't talk about them."""
+    message = run(session, "drop_rows_where", conditions='Do_Not_Contact == "Yes"')["message"]
+    assert message.startswith("Dropped 5 rows where") and "training" not in message and "Test rows" not in message
+    # With a target, the full explanation is still there
+    s = DataSession(call_list(), "c.csv")
+    run(s, "select_target", column="Do_Not_Contact")
+    assert "training rows" in run(s, "drop_rows_where", conditions="CustomerID > 18")["message"]
+
+
 def test_no_model_tools(session):
     for tool in ("train_models", "final_exam", "predict"):
         result = execute_tool(tool, session, {})

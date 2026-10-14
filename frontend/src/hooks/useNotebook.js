@@ -188,7 +188,7 @@ export function useNotebook() {
                 status: data.failed ? 'error' : 'done',
                 reply: data.reply,
                 // A built-in step from the verified library: a Run card, not code
-                suggestions: data.step ? [{ ...data.step, verified: true }] : undefined,
+                suggestions: data.steps?.length ? data.steps.map(s => ({ ...s, verified: true })) : undefined,
                 provider: data.provider,
                 model: data.model,
                 fallbackNote: data.fallback_note,

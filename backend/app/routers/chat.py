@@ -22,8 +22,8 @@ async def assist(request: ChatRequest, visitor: str = Depends(current_owner)):
     if not result.get("failed"):
         # Remembered (with the step or code it proposed), so follow-ups like "now plot it" make sense
         said = result["reply"] + (f"\n```python\n{result['code']}\n```" if result.get("code") else "")
-        if result.get("step"):
-            said += f"\n```step\n{json.dumps(result['step'])}\n```"
+        for step in result.get("steps") or []:
+            said += f"\n```step\n{json.dumps(step)}\n```"
         session.memory += [{"role": "user", "content": request.message, "kind": "assist"},
                            {"role": "assistant", "content": said, "kind": "assist"}]
         session.memory = session.memory[-40:]

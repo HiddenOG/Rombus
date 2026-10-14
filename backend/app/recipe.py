@@ -40,6 +40,7 @@ class Context:
     """What every step may know about the session besides the data itself."""
     target: Optional[str] = None
     time_column: Optional[str] = None  # time mode: the column that orders the rows
+    all_rows: bool = False  # clean-only mode: no test rows, so steps work on (and speak of) all rows
 
 
 class Step:
@@ -109,7 +110,17 @@ def run_line(line: Line, df: pd.DataFrame, ctx: Context) -> pd.DataFrame:
     line.learned = step.learn(df)
     after = step.apply(df.copy(), line.learned)
     line.message = step.summary(df, after, line.learned)
+    if ctx.all_rows:
+        line.message = all_rows_wording(line.message)
     return after
+
+
+def all_rows_wording(message: str) -> str:
+    """A step's summary for a clean-only notebook: there are no training/test rows, just rows."""
+    import re
+    sentences = re.split(r"(?<=[.!?])\s+", message)
+    kept = [s for s in sentences if not re.search(r"\b(test rows|new customers)\b", s, re.I)]
+    return re.sub(r"\b(?:[Tt]raining|TRAINING) rows\b", "rows", " ".join(kept)).strip()
 
 
 def replay(raw_train: pd.DataFrame, lines: List[Line], ctx: Context) -> pd.DataFrame:

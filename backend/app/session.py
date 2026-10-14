@@ -79,7 +79,7 @@ class DataSession:
 
     @property
     def ctx(self) -> Context:
-        return Context(target=self.target_column, time_column=self.time_column)
+        return Context(target=self.target_column, time_column=self.time_column, all_rows=self.clean_only)
 
     # ── Recipe changes ──────────────────────────────────────────────────────────
     # Every change goes through _set_recipe: replay on a scratch copy first, and keep the
