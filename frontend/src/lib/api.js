@@ -86,7 +86,8 @@ async function apiRequest(endpoint, options = {}) {
         return data;
     } catch (error) {
         if (error.name === 'TypeError' && error.message.includes('fetch')) {
-            throw new Error('Cannot connect to server. Is the backend running?', { cause: error });
+            throw new Error(`Cannot reach the backend at ${API_URL}. It may be down or still starting, or it ` +
+                "doesn't allow this site yet (its CORS_ORIGINS must be this page's address).", { cause: error });
         }
         throw error;
     }
