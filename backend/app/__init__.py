@@ -82,6 +82,33 @@ class BodySizeLimit:
         return await self.app(scope, receive, send)
 
 
+class CatchErrors:
+    """An unexpected crash becomes a plain 500 reply INSIDE the CORS layer, so the browser may read it
+    and the page shows "something went wrong" instead of "cannot connect to the server"."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        started = False
+
+        async def tracked(message):
+            nonlocal started
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+        try:
+            await self.app(scope, receive, tracked)
+        except Exception:
+            logger.exception("Unexpected error on %s %s", scope.get("method"), scope.get("path"))
+            if started:
+                raise
+            response = JSONResponse({"detail": "Something went wrong on the server; it's been logged. "
+                                               "Please try again, or try a different file or setting."}, status_code=500)
+            await response(scope, receive, send)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Rhombus — data science you can trust",
@@ -91,6 +118,7 @@ def create_app() -> FastAPI:
         default_response_class=SafeJSONResponse,
     )
     app.add_middleware(BodySizeLimit)
+    app.add_middleware(CatchErrors)  # added before CORS, so it sits inside it: crash replies keep CORS headers
 
     # CORS: only the configured sites may call the API. No cookies are used (owners are identified
     # by the Authorization and X-Visitor-Id headers), so credentials stay off.

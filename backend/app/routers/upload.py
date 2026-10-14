@@ -16,6 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from app.access import current_owner, limit
 from app.config import settings
 from app.session import session_manager
+from app.storage import one_type_per_column
 
 router = APIRouter()
 
@@ -80,7 +81,7 @@ def _read_table(name: str, contents: bytes) -> pd.DataFrame:
         reason = str(e).splitlines()[0][:200] if str(e) else type(e).__name__
         raise HTTPException(status_code=400, detail=f"Couldn't read '{name}' as a table: {reason}")
     df.columns = [str(c) for c in df.columns]  # Excel headers like 2024 come in as numbers
-    return df
+    return one_type_per_column(df)  # a column of numbers with a stray heading in it, etc.
 
 
 def _create_notebook(read: List[Tuple[str, bytes]], visitor: str):

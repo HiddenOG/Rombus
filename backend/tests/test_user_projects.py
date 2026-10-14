@@ -50,6 +50,38 @@ def test_csvs_as_people_save_them(client, name, data):
     assert columns == ["Age", "Fare £", "Survived"]
 
 
+def test_an_excel_sheet_with_mixed_columns_uploads(client):
+    """A real-world sheet: a title in the header, and columns mixing numbers and text (a heading row,
+    totals, notes). Saving it as Parquet crashed the upload, and the crash read as 'cannot connect'."""
+    import io as _io
+    sheet = pd.DataFrame({
+        "SCHEDULE OF RATES FOR PIPELINE MATERIALS": ["S/N", 1, 2, 3, "TOTAL"],
+        "Unnamed: 1": ["Description", "Pipe 6in", "Elbow", "Flange", None],
+        "Unnamed: 2": ["Qty", 10, 4.5, 2, 16.5],
+    })
+    buffer = _io.BytesIO()
+    sheet.to_excel(buffer, index=False)
+    r = upload(client, "rates.xlsx", buffer.getvalue())
+    assert r.status_code == 200, r.text
+    sid = r.json()["session_id"]
+    shown = client.post("/api/action", json={"session_id": sid, "tool": "preview_data", "arguments": {}}).json()
+    assert shown["success"]
+
+
+def test_unexpected_errors_still_reach_the_browser(client, monkeypatch):
+    """A crash comes back as a readable 500 with CORS headers, not as 'cannot connect'."""
+    from app.routers import upload as upload_router
+
+    def boom(*args):
+        raise RuntimeError("disk on fire")
+    monkeypatch.setattr(upload_router, "_create_notebook", boom)
+    with TestClient(app, headers={**H, "Origin": "http://localhost:5173"}, raise_server_exceptions=False) as c:
+        r = c.post("/api/upload", files={"file": ("x.csv", b"a,b\n1,2\n")})
+    assert r.status_code == 500 and "Something went wrong" in r.json()["detail"]
+    assert r.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    assert "disk on fire" not in r.text  # details stay in the server log
+
+
 def test_a_binary_file_is_refused_plainly(client):
     r = upload(client, "binary.csv", bytes(range(256)) * 10)
     assert r.status_code == 400 and "isn't a text file" in r.json()["detail"]

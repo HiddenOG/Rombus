@@ -76,6 +76,34 @@ def _encode_password(rest: str) -> str:
     return f"{user}:{quote(unquote(password), safe='')}@{host}"
 
 
+def one_type_per_column(df: pd.DataFrame) -> pd.DataFrame:
+    """Columns mixing numbers and text (an Excel column of numbers with a heading or note in it) as
+    one type: numbers if every value is one, otherwise text. Parquet, and most analysis, need that."""
+    out = df
+    for col in df.columns:
+        if df[col].dtype != object:
+            continue
+        values = df[col].dropna()
+        if values.map(type).nunique() <= 1:
+            continue
+        numbers = pd.to_numeric(df[col], errors="coerce")
+        if out is df:
+            out = df.copy()
+        out[col] = numbers if numbers.notna().sum() == len(values) else df[col].map(lambda v: v if pd.isna(v) else str(v))
+    return out
+
+
+def parquet_bytes(df: pd.DataFrame) -> bytes:
+    """A table as Parquet. A column that still mixes types is stored as text instead of crashing the save."""
+    buffer = io.BytesIO()
+    try:
+        df.to_parquet(buffer, index=False)
+    except Exception:
+        buffer = io.BytesIO()
+        one_type_per_column(df).to_parquet(buffer, index=False)
+    return buffer.getvalue()
+
+
 class Database:
     """The notebook records table."""
 
@@ -185,10 +213,9 @@ class LocalFileStore:
         return os.path.join(self.folder, f"{key}.parquet")
 
     def save(self, key: str, df: pd.DataFrame) -> None:
-        buffer = io.BytesIO()
-        df.to_parquet(buffer, index=False)
+        buffer = parquet_bytes(df)
         with open(self._path(key), "wb") as f:
-            f.write(buffer.getvalue())
+            f.write(buffer)
 
     def load(self, key: str) -> Optional[pd.DataFrame]:
         path = self._path(key)
@@ -228,9 +255,8 @@ class SupabaseFileStore:
         return f"/object/{self.bucket}/{key}.parquet"
 
     def save(self, key: str, df: pd.DataFrame) -> None:
-        buffer = io.BytesIO()
-        df.to_parquet(buffer, index=False)
-        r = self.client.post(self._path(key), content=buffer.getvalue(),
+        buffer = parquet_bytes(df)
+        r = self.client.post(self._path(key), content=buffer,
                              headers={"Content-Type": "application/octet-stream", "x-upsert": "true"})
         r.raise_for_status()
 
