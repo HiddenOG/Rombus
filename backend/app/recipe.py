@@ -1184,6 +1184,69 @@ def _plain(value: Any) -> Any:
     return str(value)
 
 
+@step_type("find_clusters")
+class FindClusters(Step):
+    """Groups of similar rows (k-means or a Gaussian mixture) as a new column, see app/clustering.py.
+    Learned from the training rows only; test rows and new customers get the nearest group. Never uses
+    the target: a cluster is a feature, and a new row won't have its answer."""
+    kind = "learn"
+    MAX_CLUSTERS = 20
+
+    def _columns(self, train):
+        asked = self.args.get("columns") or []
+        if isinstance(asked, str):
+            asked = [c.strip() for c in asked.split(",") if c.strip()]
+        for col in asked:
+            self._require_column(train, col, "columns")
+            if col == self.ctx.target:
+                raise ValueError(f"'{col}' is the column you're predicting: clusters can't use it (a new row won't have it).")
+            if not pd.api.types.is_numeric_dtype(train[col]):
+                raise ValueError(f"'{col}' holds text: clusters measure distances, so use number columns "
+                                 "(encode categories first).")
+        columns = asked or [c for c in self._features(train) if pd.api.types.is_numeric_dtype(train[c])
+                            and not pd.api.types.is_bool_dtype(train[c])]
+        if not columns:
+            raise ValueError("There are no number columns to cluster on: clean or encode some first.")
+        return columns
+
+    def learn(self, train):
+        from app.clustering import learn_clusters
+        method = self.args.get("method") or "kmeans"
+        if method not in ("kmeans", "gmm"):
+            raise ValueError("Method must be kmeans or gmm.")
+        clusters = self.args.get("clusters")
+        if clusters is not None:
+            clusters = int(clusters)
+            if not 2 <= clusters <= self.MAX_CLUSTERS:
+                raise ValueError(f"Choose between 2 and {self.MAX_CLUSTERS} clusters (or leave it out to pick automatically).")
+            if clusters * 2 > len(train):
+                raise ValueError(f"{clusters} clusters need at least {clusters * 2} rows.")
+        name = (self.args.get("name") or "cluster").strip()
+        if name in train.columns:
+            raise ValueError(f"There's already a column called '{name}': choose another name.")
+        return learn_clusters(train, self._columns(train), method, clusters)
+
+    def apply(self, df, learned):
+        from app.clustering import assign_clusters
+        df[(self.args.get("name") or "cluster").strip()] = assign_clusters(df, learned)
+        return df
+
+    def summary(self, before, after, learned):
+        method = {"kmeans": "k-means", "gmm": "a Gaussian mixture"}[learned["method"]]
+        cols = learned["columns"]
+        shown = ", ".join(cols[:5]) + (f" and {len(cols) - 5} more" if len(cols) > 5 else "")
+        sizes = ", ".join(f"{i}: {n}" for i, n in enumerate(learned["sizes"]))
+        msg = (f"Added '{(self.args.get('name') or 'cluster').strip()}': {learned['clusters']} groups of similar rows "
+               f"by {method} on {shown}. Rows per group: {sizes}.")
+        if learned.get("tried"):
+            msg += f" The number of groups was chosen automatically (the best silhouette among {min(learned['tried'])}-{max(learned['tried'])})."
+        if "silhouette" in learned:
+            s = learned["silhouette"]
+            quality = "clearly separated" if s > 0.5 else "fairly separated" if s > 0.25 else "overlapping a lot"
+            msg += f" Silhouette {s} (from -1 to 1): the groups are {quality}."
+        return msg
+
+
 def _user_error(e: Exception) -> ValueError:
     """Turn an exception from user code into a readable message with the line number."""
     import traceback

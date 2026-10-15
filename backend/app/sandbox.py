@@ -316,9 +316,11 @@ def load_model(encoded: str):
 
 
 def _trusted_type(path: str) -> bool:
-    """scikit-learn and XGBoost classes, numpy/scipy data types and numpy maths functions (log1p, sqrt...). No other
-    functions: a model mustn't be able to carry a reference to something that acts (files, processes)."""
+    """scikit-learn and XGBoost classes, numpy/scipy data types, numpy maths functions (log1p, sqrt...) and
+    scikit-learn's scoring functions (a tuned search keeps its scorer, e.g. r2_score). No other functions:
+    a model mustn't be able to carry a reference to something that acts (files, processes)."""
     import importlib
+    import inspect
     import numpy as np
     module, _, name = path.rpartition(".")
     if module.split(".")[0] not in ("sklearn", "numpy", "scipy", "xgboost"):
@@ -327,7 +329,8 @@ def _trusted_type(path: str) -> bool:
         obj = getattr(importlib.import_module(module), name)
     except (ImportError, AttributeError, ValueError):
         return False
-    return isinstance(obj, (type, np.ufunc))
+    scoring_function = inspect.isfunction(obj) and module.startswith("sklearn.metrics")
+    return isinstance(obj, (type, np.ufunc)) or scoring_function
 
 
 def frame(df: pd.DataFrame) -> pd.DataFrame:

@@ -128,6 +128,17 @@ recipe_tool(
 )
 
 recipe_tool(
+    "find_clusters",
+    "Clustering: find groups of similar rows (k-means, or a Gaussian mixture for groups of different shapes) and "
+    "add each row's group as a column. Learned from the training rows; new rows get the nearest group. Leave "
+    "out the number of groups to choose it automatically (best silhouette, 2 to 8).",
+    {"method": {"type": "string", "enum": ["kmeans", "gmm"]},
+     "clusters": {"type": "integer", "description": "How many groups, 2 to 20 (leave out to choose automatically)."},
+     "columns": {**COLUMNS, "description": "Number columns to cluster on (default: all number features)."},
+     "name": {"type": "string", "description": "Name of the new column (default 'cluster')."}},
+)
+
+recipe_tool(
     "group_rare_categories",
     "Merge rare values of a text feature into one label ('other'), e.g. locations with 10 or fewer rows. "
     "Which values are common is learned from the training rows.",

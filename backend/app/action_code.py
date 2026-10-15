@@ -284,7 +284,16 @@ def _constructor(model) -> str:
     if name.startswith("XGB"):
         extra = {"eval_metric": "logloss"} if name == "XGBClassifier" else {}
         return f"{name}({', '.join(f'{k}={v!r}' for k, v in {**XGB_SETTINGS, **extra}.items())})"
-    return repr(model)
+    if name == "Pipeline":  # scaler + model: written the way people write it
+        return f"make_pipeline({', '.join(_constructor(step) for _, step in model.steps)})"
+    return " ".join(repr(model).split())  # one line, however sklearn wraps it
+
+
+def _classes(model):
+    """The classes a model is built from (a pipeline's steps included), for its imports."""
+    if type(model).__name__ == "Pipeline":
+        return [type(model)] + [c for _, step in model.steps for c in _classes(step)]
+    return [type(model)]
 
 
 def _model_lines(session, algorithms) -> str:
@@ -295,9 +304,12 @@ def _model_lines(session, algorithms) -> str:
 def _sklearn_imports(session, algorithms) -> str:
     imports = {}
     for _, model in _models(session, algorithms):
-        cls = type(model)
-        module = "xgboost" if cls.__module__.startswith("xgboost") else cls.__module__.rsplit("._", 1)[0]
-        imports.setdefault(module, set()).add(cls.__name__)
+        for cls in _classes(model):
+            if cls.__name__ == "Pipeline":
+                imports.setdefault("sklearn.pipeline", set()).add("make_pipeline")
+                continue
+            module = "xgboost" if cls.__module__.startswith("xgboost") else cls.__module__.rsplit("._", 1)[0]
+            imports.setdefault(module, set()).add(cls.__name__)
     return "\n".join(f"from {mod} import {', '.join(sorted(names))}" for mod, names in sorted(imports.items()))
 
 
@@ -442,7 +454,16 @@ def models_template(session: DataSession, algorithms) -> str:
             + "# Change settings, add models, or remove some.\n"
             + "# The app does the training and scoring (practice split, cross-validation) the same way for every\n"
             + "# model, so their scores stay comparable: here you choose WHICH models, with what settings.\n\n"
-            + f"models = {_model_lines(session, algorithms)}\n")
+            + f"models = {_model_lines(session, algorithms)}\n"
+            + "\n# Optional, and marked 'not verified' when used:\n"
+            + "# - your own cross-validation or scoring:\n"
+            + "#     from sklearn.model_selection import KFold\n"
+            + "#     cv = KFold(n_splits=10, shuffle=True, random_state=0)\n"
+            + "#     scoring = 'neg_mean_absolute_error'\n"
+            + "# - hyperparameter tuning: a search is a model too, and the settings it picks are reported:\n"
+            + "#     from sklearn.model_selection import GridSearchCV\n"
+            + "#     models['tuned_rf'] = GridSearchCV(RandomForestRegressor(random_state=0),\n"
+            + "#                                       {'n_estimators': [100, 300], 'max_depth': [None, 10]}, cv=3)\n")
 
 
 def code_info(session: DataSession, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:

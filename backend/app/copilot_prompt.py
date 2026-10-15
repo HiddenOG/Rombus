@@ -72,7 +72,7 @@ CLEAN = ["remove_columns", "remove_duplicates", "drop_missing_rows", "drop_rows_
          "standardize_text", "change_type", "rename_column", "fill_value", "impute_missing", "impute_all_missing",
          "encode_categorical", "encode_all_categorical", "scale_all_features", "log_transform", "add_column",
          "group_rare_categories", "remove_outliers", "replace_values", "strip_characters", "format_text",
-         "split_column", "date_parts", "time_feature"]
+         "split_column", "date_parts", "time_feature", "find_clusters"]
 MODEL = ["train_models", "auto_ml", "final_exam", "predict", "explain_model", "save_model"]
 
 PHASE_TOOLS = {

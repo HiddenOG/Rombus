@@ -48,6 +48,10 @@ There are three kinds of cell:
 3. MODELS: define `models = {"name": SomeScikitLearnModel(...)}` (imports included), nothing else needed.
    The app trains them on the cleaned training rows and the final exam grades them on the locked test rows.
    There's no `train` here: only X_learn (features) and y_learn (target), if you must look at them.
+   Hyperparameter tuning: a GridSearchCV / RandomizedSearchCV IS a model, put it in `models` (the app fits
+   it and reports the settings it chose). Their own cross-validation or scoring: set `cv = 10` (or a
+   splitter like KFold(...)) and/or `scoring = "neg_mean_absolute_error"` in the cell (marked not verified).
+   Any model not built in (other libraries, deep learning) also goes in a MODELS cell.
 
 Rules:
 - import pandas as pd / numpy as np at the top; scikit-learn and matplotlib are fine. No files, network or OS.
@@ -140,6 +144,11 @@ def catalogue(session: DataSession) -> str:
             settings_.append(shown)
         description = _first_sentence(spec["description"])
         lines.append(f"- {name}({', '.join(settings_)}): {description}")
+    if "train_models" in library(session) and session.problem_type:
+        from app.tools.model import MODEL_NAMES
+        registry = CLASSIFICATION_MODELS if session.problem_type == "classification" else REGRESSION_MODELS
+        lines.append("  Model names: " + ", ".join(f"{k} = {MODEL_NAMES.get(k, k)}" for k in registry)
+                     + ". Anything else (deep learning, other libraries): a MODELS cell.")
     return "\n".join(lines)
 
 
@@ -225,6 +234,10 @@ def check_step(session: DataSession, step: Any, request: str,
     if not asked_for(tool, request):
         return None, (f"{tool} is a judgement call the user didn't ask for: only propose it when they ask for "
                       "that kind of change")
+    if tool == "train_models" and _TUNE_ONLY.search(request):
+        return None, ("train_models trains models with fixed settings: it doesn't tune anything. For tuning, use "
+                      "auto_ml (the built-in search over set grids), or a MODELS cell with models = {'name': "
+                      "GridSearchCV(...)} for their own grid (and cv = ... if they asked for their own folds)")
     return {"tool": tool, "arguments": args}, None
 
 
@@ -556,6 +569,9 @@ def examine(session: DataSession, text: str, request: str) -> Dict[str, Any]:
 _CHANGE_REQUEST = re.compile(r"\b(add\w*|creat\w*|make|new (column|feature)|categori[sz]\w*|classif\w*|divid\w*|"
                              r"group\w* (them |it |these |those )?into|bucket\w*|bin\w*|map\w*|label\w*|tag\w*|"
                              r"convert\w*|replac\w*|fill\w*|drop\w*|remov\w*|renam\w*)\b", re.I)
+_TUNE_ONLY = re.compile(r"\b(tun\w*|grid ?search\w*|random\w* ?search\w*|hyper ?param\w*)\b", re.I)
+_TUNING_REQUEST = re.compile(r"\b(tun\w*|grid ?search\w*|random\w* ?search\w*|hyper ?param\w*|"
+                             r"\d+[- ]fold|k[- ]?fold|cross[- ]?validat\w*)\b", re.I)
 _ASSIGNS_COLUMN = re.compile(r"^\s*(train|df)\s*\[[^\]]+\]\s*=(?!=)|^\s*(train|df)\s*=\s*(train|df)\b", re.M)
 
 
@@ -563,6 +579,10 @@ def look_cell_meant_to_change(code: str, request: str) -> Optional[str]:
     """A LOOK cell that adds or changes columns when the request was to change the data: its changes
     would be thrown away (a Look cell works on a copy). Flagged, so the AI rewrites it as a CHANGE cell.
     Look cells that make a column only to chart or summarise it (asked to SHOW) are left alone."""
+    if _TUNING_REQUEST.search(request) and cell_kind(code) != "models":
+        return ("not a MODELS cell, but they asked to tune or cross-validate a model: only a MODELS cell gets "
+                "trained and scored. Write models = {'name': GridSearchCV(...)} (a search is a model), and "
+                "set cv = ... / scoring = ... in the cell if they asked for their own")
     if cell_kind(code) != "look" or not _ASSIGNS_COLUMN.search(code) or not _CHANGE_REQUEST.search(request):
         return None
     return ("a LOOK cell, but they asked to change the data: a Look cell works on a copy, so the new or changed "

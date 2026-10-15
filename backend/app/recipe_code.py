@@ -315,6 +315,34 @@ def apply(df, learned):
 ''')
 
 
+@builder("find_clusters")
+def _find_clusters(args, target):
+    # The app's own clustering functions, word for word: the script assigns clusters exactly as the app does
+    import inspect
+    from app import clustering
+    helpers = "\n\n\n".join(inspect.getsource(f).strip() for f in (
+        clustering._standardise, clustering.learn_clusters, clustering.assign_clusters))
+    asked = args.get("columns") or []
+    if isinstance(asked, str):
+        asked = [c.strip() for c in asked.split(",") if c.strip()]
+    clusters = int(args["clusters"]) if args.get("clusters") not in (None, "") else None
+    name = (args.get("name") or "cluster").strip()
+    return (f"AUTO_RANGE = range({clustering.AUTO_RANGE.start}, {clustering.AUTO_RANGE.stop})\n"
+            f"SAMPLE = {clustering.SAMPLE}\n\n\n{helpers}\n\n\n" + _code(f'''
+def learn(train):
+    # Groups learned from the TRAINING rows only: each column's mean and spread, and the group centres
+    columns = {asked!r} or [c for c in train.columns if c != {target!r} and pd.api.types.is_numeric_dtype(train[c])
+                            and not pd.api.types.is_bool_dtype(train[c])]
+    return learn_clusters(train, columns, {(args.get("method") or "kmeans")!r}, {clusters!r})
+
+
+def apply(df, learned):
+    # Every row (test rows, new data too) goes to its nearest group, from the learned numbers only
+    df[{name!r}] = assign_clusters(df, learned)
+    return df
+'''))
+
+
 @builder("group_rare_categories")
 def _group_rare(args, target):
     col, max_rows, label = args.get("column"), int(args.get("max_rows") or 10), args.get("label") or "other"

@@ -253,7 +253,7 @@ def _models(code, frames):
     for name, model in models.items():
         if not (hasattr(model, "fit") and hasattr(model, "predict")):
             raise UserError(f"'{name}' isn't a model: it needs fit() and predict() methods.")
-    return models, output
+    return models, output, namespace
 
 
 def run_models(job):
@@ -267,8 +267,16 @@ def run_models(job):
     frames = job["frames"]
     X_learn, y_learn = frames["X_learn"], frames["y_learn"].iloc[:, 0]
     X_check, y_check = frames["X_check"], frames["y_check"].iloc[:, 0]
-    models, output = _models(job["code"], frames)
+    models, output, namespace = _models(job["code"], frames)
     cv = TimeSeriesSplit(n_splits=job["cv"]["folds"]) if job["cv"]["time"] else job["cv"]["folds"]
+    # The cell may set its own cross-validation (`cv = 10`, `cv = KFold(...)`) and scoring
+    # (`scoring = "neg_mean_absolute_error"`): used, and reported as the cell's own, not the app's
+    custom = {}
+    if namespace.get("cv") is not None:
+        cv, custom["cv"] = namespace["cv"], _describe(namespace["cv"])
+    scoring = namespace.get("scoring")
+    if scoring is not None:
+        custom["scoring"] = str(scoring)
     results, fitted = [], {}
     for name, model in models.items():
         name = str(name)
@@ -283,13 +291,21 @@ def run_models(job):
                 result = {"model": name, "accuracy": round(float(accuracy_score(y_check, predicted)), 4),
                           "f1_score": round(float(f1_score(y_check, predicted, average="weighted", zero_division=0)), 4),
                           "report": classification_report(y_check, predicted, zero_division=0)}
-            scores = cross_val_score(model, X_learn, y_learn, cv=cv)
+            scores = cross_val_score(model, X_learn, y_learn, cv=cv, scoring=scoring)
             result["cv_mean"], result["cv_std"] = round(float(scores.mean()), 4), round(float(scores.std()), 4)
+            if hasattr(model, "best_params_"):  # a search (GridSearchCV, RandomizedSearchCV): what it chose
+                result["best_params"] = {str(k): _plain(v) for k, v in model.best_params_.items()}
+            if custom:
+                result["custom"] = custom
             fitted[name] = base64.b64encode(dumps(model)).decode()
         except Exception as e:
             result = {"model": name, "error": f"{type(e).__name__}: {e}"}
         results.append(result)
     return {"results": results, "fitted": fitted, "output": output}
+
+
+def _describe(cv) -> str:
+    return str(cv) if isinstance(cv, int) else " ".join(repr(cv).split())
 
 
 def run_check(job):

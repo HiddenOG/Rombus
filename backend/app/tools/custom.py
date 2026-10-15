@@ -85,6 +85,18 @@ def custom_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     msg = f"Trained {len(results)} custom model{'s' if len(results) != 1 else ''}. Best on the practice split: {best}."
     if auto_split:
         msg = f"{auto_split} {msg}"
+    for result in results:
+        if result.get("best_params"):
+            settings = ", ".join(f"{k}={v}" for k, v in result["best_params"].items())
+            msg += f" The search in '{result['model']}' chose: {settings}."
+    custom = next((r["custom"] for r in results if r.get("custom")), None)
+    if custom:
+        used = "; ".join(f"{k} = {v}" for k, v in custom.items())
+        msg += (f" Not verified: this cell set its own {' and '.join(custom)} ({used}), so its scores aren't "
+                "comparable with the app's, and the app can't vouch the folds keep rows apart.")
+        if session.time_column and "TimeSeriesSplit" not in custom.get("cv", "TimeSeriesSplit"):
+            msg += (f" This notebook is ordered by time ('{session.time_column}'): folds that aren't in time order "
+                    "let the model learn from the future, so these scores will look better than they are.")
     if done.get("output"):
         msg += f"\n{done['output'].strip()}"
     return {"success": True, "message": msg, "evidence": {"results": results, "best_model": best}}

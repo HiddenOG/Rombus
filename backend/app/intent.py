@@ -117,6 +117,7 @@ ON_REQUEST = {
     "format_text": r"format\w*|phone|number|digit|pattern|layout|standardi[sz]\w*|clean\w*",
     "split_column": r"split\w*|separat\w*|break\w*|divid\w*|into|address",
     "time_feature": r"return|change|pct|percent|moving|rolling|average|lag|previous|differen|trend|sma|ma\b",
+    "find_clusters": r"cluster\w*|segment\w*|k-?means|gmm|mixture|similar|group\w*|tier\w*|class(es)?\b|categori\w*|unsupervised",
 }
 
 

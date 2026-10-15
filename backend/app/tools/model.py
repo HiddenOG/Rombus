@@ -7,11 +7,20 @@ import pickle
 from typing import Dict, Any, List, Optional, Tuple
 
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
 from sklearn.ensemble import (
-    RandomForestRegressor, GradientBoostingRegressor,
-    RandomForestClassifier, GradientBoostingClassifier,
+    AdaBoostClassifier, AdaBoostRegressor, BaggingClassifier, BaggingRegressor,
+    ExtraTreesClassifier, ExtraTreesRegressor, GradientBoostingClassifier, GradientBoostingRegressor,
+    HistGradientBoostingClassifier, HistGradientBoostingRegressor, RandomForestClassifier, RandomForestRegressor,
 )
-from sklearn.linear_model import LinearRegression, Ridge, Lasso, LogisticRegression
+from sklearn.linear_model import (
+    BayesianRidge, ElasticNet, HuberRegressor, Lasso, LinearRegression, LogisticRegression, Ridge,
+    RidgeClassifier, SGDClassifier, SGDRegressor,
+)
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsRegressor, KNeighborsClassifier
 from sklearn.svm import SVC, SVR
@@ -32,27 +41,82 @@ from app.session import DataSession
 # Code tab and the editable template show these instead
 XGB_SETTINGS = dict(n_estimators=300, learning_rate=0.05, max_depth=6, subsample=0.9, colsample_bytree=0.9,
                     random_state=42, n_jobs=4)
+def _scaled(model):
+    """Models that need features on one scale (distances, gradients) get the scaler INSIDE them: it's
+    learned on each training fold only, so cross-validation and the exam stay honest."""
+    return make_pipeline(StandardScaler(), model)
+
+
 CLASSIFICATION_MODELS = {
-    "rf": lambda: RandomForestClassifier(n_estimators=100, random_state=42),
-    "gb": lambda: GradientBoostingClassifier(n_estimators=100, random_state=42),
+    # Linear
     "lr": lambda: LogisticRegression(max_iter=1000, random_state=42),
-    "dt": lambda: DecisionTreeClassifier(random_state=42),
+    "ridge_clf": lambda: RidgeClassifier(),
+    "sgd": lambda: _scaled(SGDClassifier(random_state=42)),
+    # Probabilistic
+    "nb": lambda: GaussianNB(),
+    "lda": lambda: LinearDiscriminantAnalysis(),
+    "qda": lambda: QuadraticDiscriminantAnalysis(reg_param=0.01),
+    # Distance and kernel
     "knn": lambda: KNeighborsClassifier(),
     "svc": lambda: SVC(kernel='linear', C=1, random_state=42),
+    "svc_rbf": lambda: _scaled(SVC(kernel="rbf", C=1, random_state=42)),
+    # Trees and ensembles
+    "dt": lambda: DecisionTreeClassifier(random_state=42),
+    "rf": lambda: RandomForestClassifier(n_estimators=100, random_state=42),
+    "et": lambda: ExtraTreesClassifier(n_estimators=200, random_state=42),
+    "gb": lambda: GradientBoostingClassifier(n_estimators=100, random_state=42),
+    "hgb": lambda: HistGradientBoostingClassifier(random_state=42),
+    "ada": lambda: AdaBoostClassifier(random_state=42),
+    "bag": lambda: BaggingClassifier(random_state=42),
     "xgb": lambda: XGBClassifier(**XGB_SETTINGS, eval_metric="logloss"),
+    # Neural network
+    "mlp": lambda: _scaled(MLPClassifier(hidden_layer_sizes=(64, 32), max_iter=500, early_stopping=True, random_state=42)),
 }
 
 REGRESSION_MODELS = {
+    # Linear
     "linear": lambda: LinearRegression(),
-    "rf": lambda: RandomForestRegressor(n_estimators=100, random_state=42),
-    "gb": lambda: GradientBoostingRegressor(n_estimators=100, random_state=42),
     "ridge": lambda: Ridge(),
     "lasso": lambda: Lasso(),
-    "dt": lambda: DecisionTreeRegressor(random_state=42),
+    "elasticnet": lambda: ElasticNet(random_state=42),
+    "bayesian_ridge": lambda: BayesianRidge(),
+    "huber": lambda: _scaled(HuberRegressor(max_iter=500)),
+    "sgd": lambda: _scaled(SGDRegressor(random_state=42)),
+    "poly": lambda: make_pipeline(StandardScaler(), PolynomialFeatures(degree=2), Ridge()),
+    # Distance and kernel
     "knn": lambda: KNeighborsRegressor(),
     "svr": lambda: SVR(kernel='linear', C=1),
+    "svr_rbf": lambda: _scaled(SVR(kernel="rbf", C=1)),
+    # Trees and ensembles
+    "dt": lambda: DecisionTreeRegressor(random_state=42),
+    "rf": lambda: RandomForestRegressor(n_estimators=100, random_state=42),
+    "et": lambda: ExtraTreesRegressor(n_estimators=200, random_state=42),
+    "gb": lambda: GradientBoostingRegressor(n_estimators=100, random_state=42),
+    "hgb": lambda: HistGradientBoostingRegressor(random_state=42),
+    "ada": lambda: AdaBoostRegressor(random_state=42),
+    "bag": lambda: BaggingRegressor(random_state=42),
     "xgb": lambda: XGBRegressor(**XGB_SETTINGS),
+    # Neural network
+    "mlp": lambda: _scaled(MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, early_stopping=True, random_state=42)),
 }
+
+# What each short name means (for the assistant, the step's description and error messages)
+MODEL_NAMES = {
+    "lr": "logistic regression", "ridge_clf": "ridge classifier", "sgd": "stochastic gradient descent (linear)",
+    "nb": "Gaussian naive Bayes", "lda": "linear discriminant analysis", "qda": "quadratic discriminant analysis",
+    "knn": "k-nearest neighbours", "svc": "linear SVM", "svc_rbf": "RBF-kernel SVM",
+    "dt": "decision tree", "rf": "random forest", "et": "extra trees", "gb": "gradient boosting",
+    "hgb": "histogram gradient boosting (fast, handles blanks)", "ada": "AdaBoost", "bag": "bagging",
+    "xgb": "XGBoost", "mlp": "neural network (multilayer perceptron)",
+    "linear": "linear regression", "ridge": "ridge", "lasso": "lasso", "elasticnet": "elastic net",
+    "bayesian_ridge": "Bayesian ridge", "huber": "Huber (robust to outliers)", "poly": "polynomial (degree 2) + ridge",
+    "svr": "linear SVR", "svr_rbf": "RBF-kernel SVR",
+}
+
+
+def describe_models(registry) -> str:
+    return ", ".join(f"{k} ({MODEL_NAMES.get(k, k)})" for k in registry)
+
 
 # AutoML param grids
 AUTOML_CLASSIFICATION_GRIDS = {
@@ -102,6 +166,17 @@ ALGORITHM_ALIASES = {
     "svm": "svc", "support_vector_machine": "svc",
     "ridge_regression": "ridge", "lasso_regression": "lasso",
     "linear_regression": "linear", "linearregression": "linear", "ols": "linear", "lr_regression": "linear",
+    "extra_trees": "et", "extratrees": "et", "extremely_randomized_trees": "et",
+    "hist_gradient_boosting": "hgb", "histgradientboosting": "hgb", "hist_gb": "hgb",
+    "adaboost": "ada", "ada_boost": "ada", "bagging": "bag",
+    "naive_bayes": "nb", "gaussian_nb": "nb", "gaussiannb": "nb", "bayes": "nb",
+    "linear_discriminant_analysis": "lda", "quadratic_discriminant_analysis": "qda",
+    "neural_network": "mlp", "neural_net": "mlp", "multilayer_perceptron": "mlp", "multi_layer_perceptron": "mlp",
+    "perceptron": "mlp", "ann": "mlp", "mlp_regressor": "mlp", "mlp_classifier": "mlp",
+    "elastic_net": "elasticnet", "bayesianridge": "bayesian_ridge", "huber_regressor": "huber",
+    "stochastic_gradient_descent": "sgd", "polynomial": "poly", "polynomial_regression": "poly",
+    "ridge_classifier": "ridge_clf", "rbf_svm": "svc_rbf", "svm_rbf": "svc_rbf", "kernel_svm": "svc_rbf",
+    "linear_svm": "svc", "linear_svc": "svc", "svr_linear": "svr", "kernel_svr": "svr_rbf", "rbf_svr": "svr_rbf",
 }
 
 
@@ -114,8 +189,11 @@ def resolve_algorithms(asked: Any, problem_type: Optional[str]) -> Tuple[List[st
     asked = [str(a).strip() for a in asked]
     keys = [ALGORITHM_ALIASES.get(a.lower().replace(" ", "_").replace("-", "_"), a.lower()) for a in asked]
     if problem_type == "regression":
-        # "lr" is logistic regression for yes/no problems; for numbers it can only mean linear regression
-        keys = ["linear" if k == "lr" else k for k in keys]
+        # Names that mean the other kind of model on a number target: "lr" (logistic) -> linear regression,
+        # an SVM -> its regression twin, a ridge classifier -> ridge
+        keys = [{"lr": "linear", "svc": "svr", "svc_rbf": "svr_rbf", "ridge_clf": "ridge"}.get(k, k) for k in keys]
+    elif problem_type == "classification":
+        keys = [{"svr": "svc", "svr_rbf": "svc_rbf", "ridge": "ridge_clf", "linear": "lr"}.get(k, k) for k in keys]
     stand_ins = [f"{a} -> {ALGORITHM_ALIASES[a.lower()]}" for a in asked if a.lower() in STAND_INS]
     return list(dict.fromkeys(keys)), stand_ins
 
@@ -315,8 +393,12 @@ def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str,
 
 
 def time_order(df: pd.DataFrame, time_column: str) -> pd.Index:
-    """Row labels sorted by time (stable, so rows with the same time keep their order)."""
+    """Row labels sorted by time (stable, so rows with the same time keep their order). If the date column
+    was removed (or renamed) by the recipe, the rows are still in time order: the lock sorted them, and
+    steps keep row order."""
     from app.expressions import as_dates
+    if time_column not in df.columns:
+        return df.index
     return as_dates(df[time_column]).sort_values(kind="stable").index
 
 
@@ -332,7 +414,7 @@ def cv_splitter(session: DataSession, folds: int):
 @register_tool(
     "train_models",
     "Train and cross-validate models. Classification algorithms: "
-    + ", ".join(CLASSIFICATION_MODELS) + ". Regression algorithms: " + ", ".join(REGRESSION_MODELS) + ".",
+    + describe_models(CLASSIFICATION_MODELS) + ". Regression algorithms: " + describe_models(REGRESSION_MODELS) + ".",
     {
         "algorithms": {
             "type": "array",
@@ -350,7 +432,8 @@ def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     if unknown:
         return {"success": False,
                 "message": f"Unknown algorithm{'s' if len(unknown) > 1 else ''} for {session.problem_type}: "
-                           f"{', '.join(unknown)}. Available: {', '.join(model_registry)}."}
+                           f"{', '.join(unknown)}. Available: {', '.join(model_registry)}. For any other model, "
+                           "write it in a Models code cell: any scikit-learn-style model works there."}
     if "xgb" in alg_names and session.problem_type == "classification":
         xgb_problem = _xgb_label_problem(session)
         if xgb_problem:
