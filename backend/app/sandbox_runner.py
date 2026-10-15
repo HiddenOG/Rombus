@@ -545,6 +545,7 @@ def _warm_up() -> None:
         plt.close("all")
     with contextlib.suppress(ImportError):
         import seaborn  # noqa: F401
+        import xgboost  # noqa: F401
         import skops.io  # noqa: F401
 
 

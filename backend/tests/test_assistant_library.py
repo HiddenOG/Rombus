@@ -267,6 +267,26 @@ def test_checking_an_answer_doesnt_stop_the_server(session, monkeypatch):
     assert asyncio.run(ticks_while_checking()) >= 8  # ~12 in 0.6 s; a blocked loop manages 0 or 1
 
 
+LOOK_THAT_ADDS = 'classes = {"Whitefield": "upper"}\ndf["class"] = df["location"].map(classes).fillna("unknown")\nresult = df.head()'
+CHANGE_THAT_ADDS = ('def learn(train):\n    return {}\n\ndef apply(df, learned):\n'
+                    '    df["class"] = df["location"].map({"Whitefield": "upper"}).fillna("unknown")\n    return df')
+
+
+def test_a_look_cell_that_should_change_the_data_is_rewritten(session, monkeypatch):
+    """Asked to divide locations into classes, the AI wrote a Look cell: its column would vanish."""
+    monkeypatch.setattr(settings, "ALLOW_CUSTOM_CODE", True)
+    sent = fake_ai(monkeypatch, f"```python\n{LOOK_THAT_ADDS}\n```", f"```python\n{CHANGE_THAT_ADDS}\n```")
+    result = asyncio.run(assistant.assist(session, "divide these locations into lower, middle and upper class"))
+    assert result["kind"] == "change" and "Write it as a CHANGE cell" in sent[1]["messages"][-1]["content"]
+
+
+def test_a_look_cell_making_a_column_to_show_it_is_fine():
+    from app.assistant import look_cell_meant_to_change
+    chart = 'train["pps"] = train["price"] / train["total_sqft"]\ntrain["pps"].hist()'
+    assert look_cell_meant_to_change(chart, "plot a histogram of price per sqft") is None
+    assert look_cell_meant_to_change(LOOK_THAT_ADDS, "categorise the locations by class") is not None
+
+
 def test_custom_needs_still_get_code(session, monkeypatch):
     fake_ai(monkeypatch, "A custom rule.\n```python\nresult = train.groupby('location')['price'].std()\n```")
     result = asyncio.run(assistant.assist(session, "std of price per location as a table"))

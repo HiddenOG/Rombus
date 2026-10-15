@@ -55,6 +55,11 @@ Rules:
 - Never build a feature from the target column (a new row won't have it).
 - The test rows are locked away: you can't see or use them, and neither can the code.
 - If what they ask would leak information from the target or the test rows, say so and offer a safe version.
+- You can't browse the web or look anything up. When they ask for outside knowledge (which areas are
+  upscale, a country's region, a company's sector), don't refuse: write it from your general knowledge as
+  an explicit mapping in a CHANGE cell (a dict in apply(); values you're unsure of -> "unknown"), and say
+  plainly it's from general knowledge, may be wrong or out of date, and that they should check it.
+  A mapping like that uses a feature plus outside facts, never the target, so it is NOT leakage.
 - Short, readable code with brief comments.
 
 Follow on from the notebook's code, like a colleague continuing someone's notebook:
@@ -240,7 +245,8 @@ def notebook_context(session: DataSession) -> str:
     return f"""NOTEBOOK
 Dataset: {state['filename']} ({state['shape'][0]} rows x {state['shape'][1]} columns)
 Mode: {mode}
-Trained models: {', '.join(state['trained_models']) or 'none'}
+Trained models (practice scores; the final exam on the locked test rows is separate):
+{trained_models(session)}
 Recipe (in order): {recipe_lines(state['recipe'])}
 
 Columns:
@@ -253,6 +259,23 @@ Names already used in the notebook's code: {', '.join(names) or 'none yet'}
 
 The notebook so far, cell by cell (their edits included: this is the code as it is now):
 {notebook_code(session) or '(no cells yet)'}"""
+
+
+def trained_models(session: DataSession) -> str:
+    """Each trained model with its practice scores, the best marked: so "which is best?" is answered from
+    the numbers, not guessed (an assistant once said the best model 'wasn't installed')."""
+    if not session.trained_models:
+        return "- none yet"
+    from app.tools.model import best_model_name
+    best = best_model_name(session)
+    lines = []
+    for name in session.trained_models:
+        r = session.model_results.get(name, {})
+        main = (f"R² {r['r2_score']}, MAE {r.get('mae')}" if "r2_score" in r
+                else f"accuracy {r['accuracy']}, F1 {r.get('f1_score')}" if "accuracy" in r else "no score")
+        cv = f", cross-validation {r['cv_mean']} ± {r.get('cv_std')}" if "cv_mean" in r else ""
+        lines.append(f"- {name}: {main}{cv}" + ("  <- best (highest cross-validation)" if name == best else ""))
+    return "\n".join(lines)
 
 
 # ── Memory of the notebook: its code, names and requests ────────────────────────
@@ -525,8 +548,26 @@ def examine(session: DataSession, text: str, request: str) -> Dict[str, Any]:
     """read_reply, plus a trial run of any code (blocking: called on the notebook's worker thread)."""
     answer = read_reply(session, text, request)
     if answer.get("code") and not answer.get("problem"):
-        answer["code_problem"] = code_problem(session, answer["code"])
+        answer["code_problem"] = look_cell_meant_to_change(answer["code"], request) or code_problem(session, answer["code"])
     return answer
+
+
+# Asking for the data to gain or change a column (categorise, add, map...), not just to see something
+_CHANGE_REQUEST = re.compile(r"\b(add\w*|creat\w*|make|new (column|feature)|categori[sz]\w*|classif\w*|divid\w*|"
+                             r"group\w* (them |it |these |those )?into|bucket\w*|bin\w*|map\w*|label\w*|tag\w*|"
+                             r"convert\w*|replac\w*|fill\w*|drop\w*|remov\w*|renam\w*)\b", re.I)
+_ASSIGNS_COLUMN = re.compile(r"^\s*(train|df)\s*\[[^\]]+\]\s*=(?!=)|^\s*(train|df)\s*=\s*(train|df)\b", re.M)
+
+
+def look_cell_meant_to_change(code: str, request: str) -> Optional[str]:
+    """A LOOK cell that adds or changes columns when the request was to change the data: its changes
+    would be thrown away (a Look cell works on a copy). Flagged, so the AI rewrites it as a CHANGE cell.
+    Look cells that make a column only to chart or summarise it (asked to SHOW) are left alone."""
+    if cell_kind(code) != "look" or not _ASSIGNS_COLUMN.search(code) or not _CHANGE_REQUEST.search(request):
+        return None
+    return ("a LOOK cell, but they asked to change the data: a Look cell works on a copy, so the new or changed "
+            "columns would be thrown away. Write it as a CHANGE cell: def learn(train) returning what apply "
+            "needs (here, probably {}), and def apply(df, learned) that adds the column and returns df")
 
 
 def _briefing(session: DataSession) -> Tuple[str, str]:

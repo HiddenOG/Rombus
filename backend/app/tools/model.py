@@ -16,6 +16,7 @@ from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsRegressor, KNeighborsClassifier
 from sklearn.svm import SVC, SVR
 from sklearn.base import clone
+from xgboost import XGBClassifier, XGBRegressor
 from sklearn.metrics import (
     mean_squared_error, r2_score, mean_absolute_error,
     accuracy_score, f1_score, classification_report, confusion_matrix,
@@ -26,6 +27,11 @@ from app.session import DataSession
 
 
 # --- Algorithm Registry ---
+
+# XGBoost's settings, written out: its own printout lists every possible setting (mostly None), so the
+# Code tab and the editable template show these instead
+XGB_SETTINGS = dict(n_estimators=300, learning_rate=0.05, max_depth=6, subsample=0.9, colsample_bytree=0.9,
+                    random_state=42, n_jobs=4)
 CLASSIFICATION_MODELS = {
     "rf": lambda: RandomForestClassifier(n_estimators=100, random_state=42),
     "gb": lambda: GradientBoostingClassifier(n_estimators=100, random_state=42),
@@ -33,6 +39,7 @@ CLASSIFICATION_MODELS = {
     "dt": lambda: DecisionTreeClassifier(random_state=42),
     "knn": lambda: KNeighborsClassifier(),
     "svc": lambda: SVC(kernel='linear', C=1, random_state=42),
+    "xgb": lambda: XGBClassifier(**XGB_SETTINGS, eval_metric="logloss"),
 }
 
 REGRESSION_MODELS = {
@@ -44,6 +51,7 @@ REGRESSION_MODELS = {
     "dt": lambda: DecisionTreeRegressor(random_state=42),
     "knn": lambda: KNeighborsRegressor(),
     "svr": lambda: SVR(kernel='linear', C=1),
+    "xgb": lambda: XGBRegressor(**XGB_SETTINGS),
 }
 
 # AutoML param grids
@@ -79,12 +87,15 @@ AUTOML_REGRESSION_GRIDS = {
 
 
 # Long names people (and AI models) naturally write, mapped to the short keys above
-# Names of libraries that aren't installed, mapped to the closest built-in (the message says so)
-STAND_INS = {"xgboost", "gbm"}
+# Names of libraries that aren't installed but quietly stand in for a built-in (the message says so).
+# Empty on purpose: a silent substitute (xgboost -> gb) confused people and the assistant alike, so an
+# unknown library is refused with the list of what's available instead.
+STAND_INS: set = set()
 
 ALGORITHM_ALIASES = {
     "random_forest": "rf", "randomforest": "rf",
-    "gradient_boosting": "gb", "gradientboosting": "gb", "gbm": "gb", "xgboost": "gb",
+    "gradient_boosting": "gb", "gradientboosting": "gb", "gbm": "gb",
+    "xgboost": "xgb", "xgbregressor": "xgb", "xgbclassifier": "xgb", "extreme_gradient_boosting": "xgb",
     "logistic_regression": "lr", "logisticregression": "lr", "logistic": "lr",
     "decision_tree": "dt", "decisiontree": "dt", "tree": "dt",
     "k_nearest_neighbors": "knn", "nearest_neighbors": "knn", "kneighbors": "knn",
@@ -92,6 +103,21 @@ ALGORITHM_ALIASES = {
     "ridge_regression": "ridge", "lasso_regression": "lasso",
     "linear_regression": "linear", "linearregression": "linear", "ols": "linear", "lr_regression": "linear",
 }
+
+
+def resolve_algorithms(asked: Any, problem_type: Optional[str]) -> Tuple[List[str], List[str]]:
+    """What people (and AIs) call models -> registry keys: "Random Forest" -> rf, "xgboost" -> xgb,
+    "rf, gb" -> [rf, gb]. Returns (keys, notes about stand-ins). One place, so training and the code
+    shown for it always agree."""
+    if isinstance(asked, str):
+        asked = [a for a in asked.split(",") if a.strip()]
+    asked = [str(a).strip() for a in asked]
+    keys = [ALGORITHM_ALIASES.get(a.lower().replace(" ", "_").replace("-", "_"), a.lower()) for a in asked]
+    if problem_type == "regression":
+        # "lr" is logistic regression for yes/no problems; for numbers it can only mean linear regression
+        keys = ["linear" if k == "lr" else k for k in keys]
+    stand_ins = [f"{a} -> {ALGORITHM_ALIASES[a.lower()]}" for a in asked if a.lower() in STAND_INS]
+    return list(dict.fromkeys(keys)), stand_ins
 
 ALGORITHM = {
     "type": "string",
@@ -141,6 +167,17 @@ def target_classes(session: DataSession) -> Optional[List[str]]:
             if classes:
                 return classes
     return None
+
+
+def _xgb_label_problem(session: DataSession) -> Optional[str]:
+    """XGBoost's classifier needs the answers numbered 0, 1, 2...; why it can't run here, or None."""
+    labels = pd.Series(session.original_df[session.target_column].dropna().unique())
+    numbered = pd.api.types.is_numeric_dtype(labels) and sorted(labels.tolist()) == list(range(len(labels)))
+    if numbered or target_classes(session):
+        return None
+    return (f"XGBoost needs '{session.target_column}' as numbers 0, 1, 2... (it has {', '.join(map(str, labels[:4]))}). "
+            f"Label-encode it first (Encode categorical: {session.target_column}, label): predictions still come "
+            "back as the original labels. The other models work as it is.")
 
 
 def fit_and_score(session: DataSession, name: str, model: Any, cv_folds: int) -> Dict[str, Any]:
@@ -308,25 +345,20 @@ def cv_splitter(session: DataSession, folds: int):
 def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     """Train one or more ML models (doing the practice split first if it hasn't happened)."""
     model_registry = CLASSIFICATION_MODELS if session.problem_type == "classification" else REGRESSION_MODELS
-    asked = args.get("algorithms", ["rf", "gb"])
-    if isinstance(asked, str):  # "rf, gb" rather than ["rf", "gb"]: not letter by letter
-        asked = [a for a in asked.split(",") if a.strip()]
-    asked = [str(a).strip() for a in asked]
-    alg_names = [ALGORITHM_ALIASES.get(a.lower().replace(" ", "_"), a.lower()) for a in asked]
-    if session.problem_type == "regression":
-        # "lr" is logistic regression for yes/no problems; for numbers it can only mean linear regression
-        alg_names = ["linear" if a == "lr" else a for a in alg_names]
+    alg_names, stand_ins = resolve_algorithms(args.get("algorithms", ["rf", "gb"]), session.problem_type)
     unknown = [a for a in alg_names if a not in model_registry]
     if unknown:
         return {"success": False,
                 "message": f"Unknown algorithm{'s' if len(unknown) > 1 else ''} for {session.problem_type}: "
                            f"{', '.join(unknown)}. Available: {', '.join(model_registry)}."}
-    # Stand-ins say so: "xgboost" isn't installed here, its closest built-in is
-    stand_ins = [f"{a} → {ALGORITHM_ALIASES[a.lower()]}" for a in asked if a.lower() in STAND_INS]
+    if "xgb" in alg_names and session.problem_type == "classification":
+        xgb_problem = _xgb_label_problem(session)
+        if xgb_problem:
+            return {"success": False, "message": xgb_problem}
 
     auto_split = ensure_practice_split(session)
     cv_folds = safe_cv_folds(session, args.get("cv_folds", 5))
-    results = [fit_and_score(session, alg, model_registry[alg](), cv_folds) for alg in dict.fromkeys(alg_names)]
+    results = [fit_and_score(session, alg, model_registry[alg](), cv_folds) for alg in alg_names]
 
     best = finish_training(session, results)
     msg = f"Trained {len(results)} model{'s' if len(results) != 1 else ''}. Best on the practice split: {best}."

@@ -263,7 +263,7 @@ class ModalSandbox:
         import modal
         return (modal.Image.debian_slim(python_version="3.12")
                 .pip_install("pandas>=3.0,<4", "numpy>=2.3", "scikit-learn>=1.9", "scipy>=1.18", "pyarrow>=25",
-                             "matplotlib>=3.9", "seaborn>=0.13", "skops>=0.16")
+                             "matplotlib>=3.9", "seaborn>=0.13", "skops>=0.16", "xgboost-cpu>=2.1")
                 .env({"MPLBACKEND": "Agg", "OPENBLAS_NUM_THREADS": "1"})
                 .add_local_file(str(RUNNER), "/sandbox/runner.py"))
 
@@ -316,12 +316,12 @@ def load_model(encoded: str):
 
 
 def _trusted_type(path: str) -> bool:
-    """scikit-learn classes, numpy/scipy data types and numpy maths functions (log1p, sqrt...). No other
+    """scikit-learn and XGBoost classes, numpy/scipy data types and numpy maths functions (log1p, sqrt...). No other
     functions: a model mustn't be able to carry a reference to something that acts (files, processes)."""
     import importlib
     import numpy as np
     module, _, name = path.rpartition(".")
-    if module.split(".")[0] not in ("sklearn", "numpy", "scipy"):
+    if module.split(".")[0] not in ("sklearn", "numpy", "scipy", "xgboost"):
         return False
     try:
         obj = getattr(importlib.import_module(module), name)

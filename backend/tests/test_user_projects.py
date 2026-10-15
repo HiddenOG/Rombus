@@ -202,9 +202,50 @@ def test_numbers_and_lists_given_as_text(houses):
     assert trained["success"] and set(houses.trained_models) >= {"rf", "linear"}
 
 
-def test_stand_in_algorithms_are_named(houses):
-    message = execute_tool("train_models", houses, {"algorithms": ["xgboost"]})["message"]
-    assert "xgboost → gb" in message
+def test_libraries_that_arent_installed_are_refused_not_substituted(houses):
+    result = execute_tool("train_models", houses, {"algorithms": ["lightgbm"]})
+    assert not result["success"] and "Unknown algorithm" in result["message"] and "xgb" in result["message"]
+
+
+# ── XGBoost: a real model, not a stand-in ────────────────────────────────────
+
+def test_xgboost_trains_and_its_code_shows_it(houses):
+    from app.action_code import code_info
+    result = execute_tool("train_models", houses, {"algorithms": ["linear", "XGBoost", "Decision Tree"]})
+    assert result["success"] and "Not installed" not in result["message"]
+    assert [r["model"] for r in result["evidence"]["results"]] == ["linear", "xgb", "dt"]
+    assert type(houses.trained_models["xgb"]).__name__ == "XGBRegressor"
+    info = code_info(houses, "train_models", {"algorithms": ["linear", "xgboost", "dt"]})
+    assert "from xgboost import XGBRegressor" in info["code"] and "'xgb': XGBRegressor(n_estimators=300" in info["code"]
+    assert "'xgb': XGBRegressor(" in info["template"] and "the same way for every" in info["template"]
+    assert execute_tool("final_exam", houses, {"algorithm": "xgb"})["success"]
+
+
+def test_xgboost_for_yes_no_needs_numbered_answers():
+    def notebook(answers):
+        s = DataSession(pd.DataFrame({"x": range(60), "z": [i % 5 for i in range(60)], "y": answers * 30}), "c.csv")
+        execute_tool("select_target", s, {"column": "y"})
+        return s
+    assert execute_tool("train_models", notebook([0, 1]), {"algorithms": ["xgb"]})["success"]
+    words = notebook(["yes", "no"])
+    refused = execute_tool("train_models", words, {"algorithms": ["xgb"]})
+    assert not refused["success"] and "Label-encode it first" in refused["message"]
+    execute_tool("encode_categorical", words, {"column": "y", "method": "label"})
+    assert execute_tool("train_models", words, {"algorithms": ["xgb"]})["success"]
+
+
+def test_xgboost_in_a_models_cell_comes_back_from_the_sandbox(houses):
+    code = "from xgboost import XGBRegressor\nmodels = {'my_xgb': XGBRegressor(n_estimators=50, max_depth=3)}"
+    result = execute_tool("custom_models", houses, {"code": code})
+    assert result["success"], result["message"]
+    assert type(houses.trained_models["my_xgb"]).__name__ == "XGBRegressor"
+
+
+def test_the_assistant_sees_each_models_scores(houses):
+    from app.assistant import notebook_context
+    execute_tool("train_models", houses, {"algorithms": ["linear", "xgb"]})
+    context = notebook_context(houses)
+    assert "- xgb: R²" in context and "cross-validation" in context and "<- best" in context
 
 
 def test_predict_takes_a_renamed_column_by_its_new_name(houses):

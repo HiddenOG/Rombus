@@ -268,21 +268,36 @@ X_learn, X_check, y_learn, y_check = train_test_split(X, y, test_size={size}, ra
 '''))
 
 
-def _model_lines(session, algorithms) -> str:
-    from app.tools.model import CLASSIFICATION_MODELS, REGRESSION_MODELS
+def _models(session, algorithms):
+    """(key, model) for each algorithm as training resolves it ("xgboost" -> xgb), in the same order."""
+    from app.tools.model import CLASSIFICATION_MODELS, REGRESSION_MODELS, resolve_algorithms
     registry = CLASSIFICATION_MODELS if session.problem_type == "classification" else REGRESSION_MODELS
-    lines = [f"    {a!r}: {registry[a]()!r}," for a in algorithms if a in registry]
+    keys, _ = resolve_algorithms(algorithms, session.problem_type)
+    return [(k, registry[k]()) for k in keys if k in registry]
+
+
+def _constructor(model) -> str:
+    """How a model is written in code. XGBoost's own printout lists every possible setting, so it's
+    written with the settings the app actually uses."""
+    from app.tools.model import XGB_SETTINGS
+    name = type(model).__name__
+    if name.startswith("XGB"):
+        extra = {"eval_metric": "logloss"} if name == "XGBClassifier" else {}
+        return f"{name}({', '.join(f'{k}={v!r}' for k, v in {**XGB_SETTINGS, **extra}.items())})"
+    return repr(model)
+
+
+def _model_lines(session, algorithms) -> str:
+    lines = [f"    {key!r}: {_constructor(model)}," for key, model in _models(session, algorithms)]
     return "{\n" + "\n".join(lines) + "\n}"
 
 
 def _sklearn_imports(session, algorithms) -> str:
-    from app.tools.model import CLASSIFICATION_MODELS, REGRESSION_MODELS
-    registry = CLASSIFICATION_MODELS if session.problem_type == "classification" else REGRESSION_MODELS
     imports = {}
-    for a in algorithms:
-        if a in registry:
-            cls = type(registry[a]())
-            imports.setdefault(cls.__module__.rsplit("._", 1)[0], set()).add(cls.__name__)
+    for _, model in _models(session, algorithms):
+        cls = type(model)
+        module = "xgboost" if cls.__module__.startswith("xgboost") else cls.__module__.rsplit("._", 1)[0]
+        imports.setdefault(module, set()).add(cls.__name__)
     return "\n".join(f"from {mod} import {', '.join(sorted(names))}" for mod, names in sorted(imports.items()))
 
 
@@ -423,8 +438,10 @@ def models_template(session: DataSession, algorithms) -> str:
     """Editable starting point for custom models: the cell's own models, written out."""
     algorithms = algorithms or ["rf", "gb"]
     return (_sklearn_imports(session, algorithms) + "\n\n"
-            + "# Define the models to compare as {name: model}. Any scikit-learn-style model works.\n"
-            + "# Change settings, add models, or remove some. The app trains and scores them like built-ins.\n\n"
+            + "# Define the models to compare as {name: model}. Any scikit-learn-style model works (XGBoost too).\n"
+            + "# Change settings, add models, or remove some.\n"
+            + "# The app does the training and scoring (practice split, cross-validation) the same way for every\n"
+            + "# model, so their scores stay comparable: here you choose WHICH models, with what settings.\n\n"
             + f"models = {_model_lines(session, algorithms)}\n")
 
 
