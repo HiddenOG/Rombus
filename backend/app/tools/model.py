@@ -20,11 +20,13 @@ from sklearn.linear_model import (
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+from sklearn.preprocessing import FunctionTransformer, PolynomialFeatures, StandardScaler
 from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsRegressor, KNeighborsClassifier
 from sklearn.svm import SVC, SVR
 from sklearn.base import clone
+from catboost import CatBoostClassifier, CatBoostRegressor
+from lightgbm import LGBMClassifier, LGBMRegressor
 from xgboost import XGBClassifier, XGBRegressor
 from sklearn.metrics import (
     mean_squared_error, r2_score, mean_absolute_error,
@@ -41,6 +43,16 @@ from app.session import DataSession
 # Code tab and the editable template show these instead
 XGB_SETTINGS = dict(n_estimators=300, learning_rate=0.05, max_depth=6, subsample=0.9, colsample_bytree=0.9,
                     random_state=42, n_jobs=4)
+LGBM_SETTINGS = dict(n_estimators=300, learning_rate=0.05, num_leaves=31, random_state=42, n_jobs=4, verbose=-1)
+# allow_writing_files=False: CatBoost otherwise writes a training-log folder to disk on every fit
+CATBOOST_SETTINGS = dict(iterations=500, learning_rate=0.05, depth=6, random_seed=42, verbose=0, thread_count=4,
+                         allow_writing_files=False)
+WRITTEN_SETTINGS = {"XGB": XGB_SETTINGS, "LGBM": LGBM_SETTINGS, "CatBoost": CATBOOST_SETTINGS}
+
+
+def _plain_numbers(model):
+    """LightGBM refuses column names with characters like : [ ] , (e.g. "Unnamed: 1"): it gets plain numbers."""
+    return make_pipeline(FunctionTransformer(validate=True), model)
 def _scaled(model):
     """Models that need features on one scale (distances, gradients) get the scaler INSIDE them: it's
     learned on each training fold only, so cross-validation and the exam stay honest."""
@@ -69,6 +81,8 @@ CLASSIFICATION_MODELS = {
     "ada": lambda: AdaBoostClassifier(random_state=42),
     "bag": lambda: BaggingClassifier(random_state=42),
     "xgb": lambda: XGBClassifier(**XGB_SETTINGS, eval_metric="logloss"),
+    "lgbm": lambda: _plain_numbers(LGBMClassifier(**LGBM_SETTINGS)),
+    "catboost": lambda: CatBoostClassifier(**CATBOOST_SETTINGS),
     # Neural network
     "mlp": lambda: _scaled(MLPClassifier(hidden_layer_sizes=(64, 32), max_iter=500, early_stopping=True, random_state=42)),
 }
@@ -96,6 +110,8 @@ REGRESSION_MODELS = {
     "ada": lambda: AdaBoostRegressor(random_state=42),
     "bag": lambda: BaggingRegressor(random_state=42),
     "xgb": lambda: XGBRegressor(**XGB_SETTINGS),
+    "lgbm": lambda: _plain_numbers(LGBMRegressor(**LGBM_SETTINGS)),
+    "catboost": lambda: CatBoostRegressor(**CATBOOST_SETTINGS),
     # Neural network
     "mlp": lambda: _scaled(MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, early_stopping=True, random_state=42)),
 }
@@ -107,7 +123,8 @@ MODEL_NAMES = {
     "knn": "k-nearest neighbours", "svc": "linear SVM", "svc_rbf": "RBF-kernel SVM",
     "dt": "decision tree", "rf": "random forest", "et": "extra trees", "gb": "gradient boosting",
     "hgb": "histogram gradient boosting (fast, handles blanks)", "ada": "AdaBoost", "bag": "bagging",
-    "xgb": "XGBoost", "mlp": "neural network (multilayer perceptron)",
+    "xgb": "XGBoost", "lgbm": "LightGBM", "catboost": "CatBoost (uses text columns like location directly)",
+    "mlp": "neural network (multilayer perceptron)",
     "linear": "linear regression", "ridge": "ridge", "lasso": "lasso", "elasticnet": "elastic net",
     "bayesian_ridge": "Bayesian ridge", "huber": "Huber (robust to outliers)", "poly": "polynomial (degree 2) + ridge",
     "svr": "linear SVR", "svr_rbf": "RBF-kernel SVR",
@@ -160,6 +177,8 @@ ALGORITHM_ALIASES = {
     "random_forest": "rf", "randomforest": "rf",
     "gradient_boosting": "gb", "gradientboosting": "gb", "gbm": "gb",
     "xgboost": "xgb", "xgbregressor": "xgb", "xgbclassifier": "xgb", "extreme_gradient_boosting": "xgb",
+    "lightgbm": "lgbm", "light_gbm": "lgbm", "lgbmregressor": "lgbm", "lgbmclassifier": "lgbm", "lgb": "lgbm",
+    "cat_boost": "catboost", "catboostregressor": "catboost", "catboostclassifier": "catboost", "cb": "catboost",
     "logistic_regression": "lr", "logisticregression": "lr", "logistic": "lr",
     "decision_tree": "dt", "decisiontree": "dt", "tree": "dt",
     "k_nearest_neighbors": "knn", "nearest_neighbors": "knn", "kneighbors": "knn",
@@ -237,6 +256,50 @@ def model_features(df: pd.DataFrame, target: str) -> pd.DataFrame:
     return X.fillna(0)
 
 
+def reads_text(model) -> bool:
+    """Models that take text categories as they are (CatBoost), instead of the all-number table. Known by
+    type, not a marker: CatBoost drops extra attributes when it's saved and loaded."""
+    return type(model).__name__.startswith("CatBoost")
+
+
+def text_features(df: pd.DataFrame, target: str) -> pd.DataFrame:
+    """The inputs for a model that reads text itself (CatBoost): every column but the target and dates;
+    text stays text, however many values it has (location's 1,200 areas included), blanks as "(blank)"."""
+    from app.expressions import looks_like_dates
+    X = df.drop(columns=[target], errors="ignore")
+    text = categorical_columns(X)
+    dates = [c for c in X.columns if pd.api.types.is_datetime64_any_dtype(X[c])]
+    dates += [c for c in text if len(X) > 1 and looks_like_dates(X[c])]
+    X = X.drop(columns=dates)
+    for col in categorical_columns(X):
+        X[col] = X[col].astype(object).where(X[col].notna(), "(blank)").astype(str)
+    return X
+
+
+def fit_params(model, X: pd.DataFrame) -> Dict[str, Any]:
+    """What a model needs told when it's trained: CatBoost, which columns are text. Given at fit time,
+    not as a setting: scikit-learn's copies (one per cross-validation fold) reject that setting."""
+    return {"cat_features": categorical_columns(X)} if reads_text(model) else {}
+
+
+def inputs_for(model, df: pd.DataFrame, target: str, columns) -> pd.DataFrame:
+    """The table this model was trained on, built from rows (test rows, a new customer) the same way:
+    the all-number table lined up with training's `columns`, or, for CatBoost, text kept as text."""
+    if not reads_text(model):
+        return model_features(df, target).reindex(columns=columns, fill_value=0)
+    X = text_features(df, target)
+    trained_on = list(model.feature_names_)
+    text = {trained_on[i] for i in model.get_cat_feature_indices()}
+    for col in trained_on:
+        if col not in X:
+            X[col] = "(blank)" if col in text else np.nan
+        elif col in text:
+            X[col] = X[col].astype(str)
+        else:
+            X[col] = pd.to_numeric(X[col], errors="coerce")
+    return X[trained_on]
+
+
 def target_classes(session: DataSession) -> Optional[List[str]]:
     """If the target was label-encoded in the recipe, the classes needed to decode predictions."""
     for line in reversed(session.recipe):
@@ -260,8 +323,13 @@ def _xgb_label_problem(session: DataSession) -> Optional[str]:
 
 def fit_and_score(session: DataSession, name: str, model: Any, cv_folds: int) -> Dict[str, Any]:
     """Train one model on the practice split, score it, and remember it. Shared by built-in and custom models."""
-    model.fit(session.X_train, session.y_train)
-    y_pred = model.predict(session.X_test)
+    X_learn, X_check = session.X_train, session.X_test
+    if reads_text(model):
+        # The same practice-split rows, with text kept as text (CatBoost learns from it directly)
+        rows = text_features(session.df, session.target_column)
+        X_learn, X_check = rows.loc[session.X_train.index], rows.loc[session.X_test.index]
+    model.fit(X_learn, session.y_train, **fit_params(model, X_learn))
+    y_pred = model.predict(X_check)
 
     if session.problem_type == "regression":
         result = {
@@ -279,7 +347,8 @@ def fit_and_score(session: DataSession, name: str, model: Any, cv_folds: int) ->
         }
 
     # Cross-validation: several mini-exams within the training part
-    cv_scores = cross_val_score(model, session.X_train, session.y_train, cv=cv_splitter(session, cv_folds))
+    cv_scores = cross_val_score(model, X_learn, session.y_train, cv=cv_splitter(session, cv_folds),
+                                params=fit_params(model, X_learn))
     result["cv_mean"] = round(float(cv_scores.mean()), 4)
     result["cv_std"] = round(float(cv_scores.std()), 4)
 
@@ -316,7 +385,8 @@ def ensure_practice_split(session: DataSession) -> str:
         notes.append("in time order: the check rows are the latest ones")
     skipped = ignored_columns(session.df, session.target_column)
     if skipped:
-        notes.append(f"Not used as model inputs: {skipped} (dates, or text with over {MAX_AUTO_ONEHOT} values)")
+        notes.append(f"Not used as model inputs: {skipped} (dates, or text with over {MAX_AUTO_ONEHOT} values; "
+                     "CatBoost does use such text columns)")
     return (f"(Made a practice split first: {len(session.X_train)} rows to learn from, {len(session.X_test)} to "
             f"check against{'; ' + '. '.join(notes) if notes else ''}.)")
 
@@ -387,7 +457,7 @@ def do_train_test_split(session: DataSession, args: Dict[str, Any]) -> Dict[str,
         msg += f" Auto-encoded {len(object_cols)} categorical columns: {object_cols}."
     if skipped:
         msg += (f" Not used as model inputs: {skipped} (dates, or text with over {MAX_AUTO_ONEHOT} values; "
-                "use Date parts, Group rare categories, or remove them).")
+                "use Date parts, Group rare categories, or remove them; CatBoost uses such text columns as they are).")
 
     return {"success": True, "message": msg}
 
@@ -534,11 +604,13 @@ def final_exam(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         fresh = clone(session.trained_models[name])
     except TypeError:  # custom models that don't follow scikit-learn's conventions
         fresh = copy.deepcopy(session.trained_models[name])
-    model = fresh.fit(X_all, y_all)
+    if reads_text(fresh):
+        X_all = text_features(session.df, target)  # CatBoost: the same rows, text kept as text
+    model = fresh.fit(X_all, y_all, **fit_params(fresh, X_all))
 
     # 2. The locked rows go through the recipe with the TRAINING sticky notes: no learning from them
     prepared = session.prepare(session.test_df)
-    X_test = model_features(prepared, target).reindex(columns=X_all.columns, fill_value=0)
+    X_test = inputs_for(model, prepared, target, X_all.columns)
     y_test = prepared[target]
     predicted = model.predict(X_test)
 
@@ -634,7 +706,7 @@ def predict(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     removed = {c for line in session.recipe if line.tool == "remove_columns" for c in line.args.get("columns", [])}
     missing = [c for c in raw_columns if c not in features and c not in removed]
     prepared = session.prepare(pd.DataFrame([{k: v for k, v in features.items() if k in raw_columns}]))
-    X = model_features(prepared, session.target_column).reindex(columns=session.X_train.columns, fill_value=0)
+    X = inputs_for(model, prepared, session.target_column, session.X_train.columns)
 
     prediction = model.predict(X)[0]
     classes = target_classes(session)
@@ -686,7 +758,7 @@ def explain_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         # Use appropriate explainer
         if hasattr(model, 'feature_importances_'):
             # Tree-based: use built-in feature importance + SHAP
-            feature_names = session.X_train.columns.tolist()
+            feature_names = list(model.feature_names_) if reads_text(model) else session.X_train.columns.tolist()
             importances = model.feature_importances_
             importance_data = sorted(
                 [{"feature": f, "importance": round(float(imp), 4)}
@@ -709,8 +781,9 @@ def explain_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         else:
             # For non-tree models, compute permutation importance
             from sklearn.inspection import permutation_importance
-            perm_result = permutation_importance(model, session.X_test, session.y_test, n_repeats=10, random_state=42)
-            feature_names = session.X_train.columns.tolist()
+            X_check = inputs_for(model, session.df.loc[session.X_test.index], session.target_column, session.X_train.columns)
+            perm_result = permutation_importance(model, X_check, session.y_test, n_repeats=10, random_state=42)
+            feature_names = X_check.columns.tolist()
             importance_data = sorted(
                 [{"feature": f, "importance": round(float(imp), 4)}
                  for f, imp in zip(feature_names, perm_result.importances_mean)],
@@ -750,7 +823,10 @@ def model_bundle(session: DataSession, model_name: Optional[str] = None) -> Tupl
         "recipe": [{"tool": l.tool, "args": l.args, "learned": l.learned} for l in session.recipe],
         "target": session.target_column,
         "problem_type": session.problem_type,
-        "feature_names": session.X_train.columns.tolist() if session.X_train is not None else [],
+        "feature_names": (list(session.trained_models[model_name].feature_names_) if reads_text(session.trained_models[model_name])
+                          else session.X_train.columns.tolist() if session.X_train is not None else []),
+        # True for CatBoost: give it text columns as text (not the one-hot table)
+        "reads_text": reads_text(session.trained_models[model_name]),
     })
 
 

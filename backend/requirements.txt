@@ -17,6 +17,8 @@ pyjwt[crypto]>=2.10  # checks Supabase login tokens
 matplotlib>=3.9  # charts drawn by custom view code (optional: views work without it)
 seaborn>=0.13  # the plotting library code cells most often reach for
 xgboost-cpu>=2.1  # XGBoost, without the GPU libraries (much smaller)
+lightgbm>=4.5
+catboost>=1.2  # gradient boosting that uses text columns (like location) directly
 skops>=0.16  # trained custom models come back from the sandbox in a format that can't carry code
 pyseccomp>=0.1.2; sys_platform == "linux"  # the sandbox takes network and programs away from code cells
 modal>=1.6  # optional fallback sandbox (CODE_SANDBOX=modal, or when the built-in one can't start)

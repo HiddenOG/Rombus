@@ -203,8 +203,9 @@ def test_numbers_and_lists_given_as_text(houses):
 
 
 def test_libraries_that_arent_installed_are_refused_not_substituted(houses):
-    result = execute_tool("train_models", houses, {"algorithms": ["lightgbm"]})
-    assert not result["success"] and "Unknown algorithm" in result["message"] and "xgb" in result["message"]
+    result = execute_tool("train_models", houses, {"algorithms": ["tabnet"]})
+    assert not result["success"] and "Unknown algorithm" in result["message"] and "catboost" in result["message"]
+    assert "Models code cell" in result["message"]
 
 
 # ── XGBoost: a real model, not a stand-in ────────────────────────────────────

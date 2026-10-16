@@ -1,5 +1,5 @@
 #!/bin/sh
-# Starts the code sandbox server (when CODE_SANDBOX=hardened), then the app.
+# Starts the code sandbox server (unless CODE_SANDBOX is local or modal), then the app.
 #
 # The sandbox server starts as root because it must switch each code run to a throwaway,
 # unprivileged user id of its own. It gets an EMPTY environment (env -i): none of the app's secrets. It never
@@ -8,7 +8,8 @@
 # The app itself runs as 'appuser', as before.
 set -e
 
-if [ "$CODE_SANDBOX" = "hardened" ]; then
+# The default (auto, or nothing set) is the hardened sandbox: a server never runs code unprotected by accident
+if [ "${CODE_SANDBOX:-auto}" != "local" ] && [ "${CODE_SANDBOX:-auto}" != "modal" ]; then
     mkdir -p /run/rhombus
     chmod 755 /run/rhombus
     (

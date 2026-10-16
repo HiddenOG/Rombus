@@ -181,7 +181,9 @@ The repo deploys as two Railway services, each built from its own Dockerfile.
    Generate a public domain for each service. Then set `CORS_ORIGINS` and `VITE_API_URL` to the
    other service's domain and redeploy. (Railway's config file path doesn't follow the root
    directory, hence the full paths.)
-3. **Supabase → Authentication → URL Configuration:** set the Site URL to the frontend domain.
+3. **Supabase → Authentication → URL Configuration:** set the Site URL to the frontend domain, and add
+   `https://<frontend domain>/**` to Redirect URLs (confirmation emails link back to the site the person
+   signed up on; Supabase only allows listed addresses, otherwise the link goes to the Site URL).
 
 The backend runs **one worker on purpose**: rate limits, the per-notebook queue and the notebook
 cache live in the process. To scale up, use a bigger machine rather than more workers.

@@ -151,6 +151,15 @@ def test_several_steps_reach_the_notebook_and_its_memory(tmp_path, monkeypatch):
         assert sent[1]["messages"][-2]["content"].count("```step") == 2  # both remembered
 
 
+def test_before_choosing_what_to_do_no_code_is_offered(monkeypatch):
+    """Code can't run until a target is chosen (or clean only): a cell that can only fail isn't offered."""
+    s = DataSession(pd.DataFrame({"a": range(10), "b": range(10)}), "d.csv")
+    assert "NOTHING IS CHOSEN YET" in system_prompt(s)
+    fake_ai(monkeypatch, "That's 10 rows.\n```python\nresult = len(train)\n```")
+    result = asyncio.run(assistant.assist(s, "how many rows are there?"))
+    assert "code" not in result and result["reply"].startswith("That's 10 rows.") and "first choose" in result["reply"]
+
+
 def test_clean_only_notebooks_are_told_there_are_no_models():
     s = DataSession(pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]}), "c.csv")
     assert execute_tool("clean_only", s, {})["success"]

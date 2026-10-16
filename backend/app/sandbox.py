@@ -113,9 +113,24 @@ def _remember_failure(e: SandboxUnavailable) -> None:
     _last_reason = e
 
 
+def on_a_server() -> bool:
+    """Running in a container or on a hosting platform, not on someone's own computer."""
+    hosted = ("RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID", "RENDER", "FLY_APP_NAME", "K_SERVICE",
+              "KUBERNETES_SERVICE_HOST", "DYNO")
+    return any(os.environ.get(v) for v in hosted) or os.path.exists("/.dockerenv")
+
+
 def _choose():
     wanted = settings.CODE_SANDBOX
+    if wanted == "auto":
+        # The safe default: never the unprotected local worker on a server, even if nobody set anything
+        if os.path.exists(settings.SANDBOX_SOCKET) or on_a_server():
+            wanted = "hardened"
+        else:
+            wanted = "local"
     if wanted == "local":
+        if on_a_server():
+            logger.warning("CODE_SANDBOX=local on a server: code cells run WITHOUT the hardened protections")
         return LocalWorker()
     if wanted == "modal":
         return ModalSandbox()
@@ -152,6 +167,9 @@ def _frames(message: bytes) -> Dict[str, Any]:
 
 # ── local: a warm worker process ───────────────────────────────────────────────
 
+STARTUP_ALLOWANCE = 120  # seconds a fresh local worker may take to load its libraries
+
+
 class LocalWorker:
     """One long-lived runner process (libraries loaded once). Jobs go one at a time; a job that runs
     past its time limit gets the worker killed and restarted."""
@@ -175,7 +193,8 @@ class LocalWorker:
 
     def run(self, job):
         with self._lock:
-            if self._process is None or self._process.poll() is not None:
+            starting = self._process is None or self._process.poll() is not None
+            if starting:
                 self._start()
             data = runner.encode(job, exact_frames=True)
             reply: Dict[str, Any] = {}
@@ -190,7 +209,9 @@ class LocalWorker:
             # The worker enforces the limit itself where it can fork; this is the backstop (Windows)
             talker = threading.Thread(target=talk, daemon=True)
             talker.start()
-            talker.join(job["limits"]["seconds"] + 5)
+            # A fresh worker first loads pandas, scikit-learn, XGBoost, LightGBM, CatBoost...: that time
+            # isn't the code's, so it doesn't count against the cell's limit
+            talker.join(job["limits"]["seconds"] + 5 + (STARTUP_ALLOWANCE if starting else 0))
             if talker.is_alive() or reply.get("message") is None:
                 self.stop()
                 if talker.is_alive():
@@ -263,7 +284,7 @@ class ModalSandbox:
         import modal
         return (modal.Image.debian_slim(python_version="3.12")
                 .pip_install("pandas>=3.0,<4", "numpy>=2.3", "scikit-learn>=1.9", "scipy>=1.18", "pyarrow>=25",
-                             "matplotlib>=3.9", "seaborn>=0.13", "skops>=0.16", "xgboost-cpu>=2.1")
+                             "matplotlib>=3.9", "seaborn>=0.13", "skops>=0.16", "xgboost-cpu>=2.1", "lightgbm>=4.5", "catboost>=1.2")
                 .env({"MPLBACKEND": "Agg", "OPENBLAS_NUM_THREADS": "1"})
                 .add_local_file(str(RUNNER), "/sandbox/runner.py"))
 
@@ -323,7 +344,9 @@ def _trusted_type(path: str) -> bool:
     import inspect
     import numpy as np
     module, _, name = path.rpartition(".")
-    if module.split(".")[0] not in ("sklearn", "numpy", "scipy", "xgboost"):
+    if path == "collections.OrderedDict":  # a plain ordered dict (LightGBM keeps its settings in one)
+        return True
+    if module.split(".")[0] not in ("sklearn", "numpy", "scipy", "xgboost", "lightgbm", "catboost"):
         return False
     try:
         obj = getattr(importlib.import_module(module), name)

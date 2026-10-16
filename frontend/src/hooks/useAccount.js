@@ -45,7 +45,11 @@ export function useAccount({ onSignedIn, onSignedOut }) {
 
     /** Returns true when the account still needs its email confirmed before signing in. */
     const signUp = async (email, password) => {
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        // The confirmation email links back to THIS site (not Supabase's default "Site URL", which may
+        // still be localhost). Supabase only allows addresses listed in its Redirect URLs setting.
+        const { data, error } = await supabase.auth.signUp({
+            email, password, options: { emailRedirectTo: window.location.origin },
+        });
         if (error) throw error;
         return !data.session;
     };

@@ -562,6 +562,8 @@ def _warm_up() -> None:
     with contextlib.suppress(ImportError):
         import seaborn  # noqa: F401
         import xgboost  # noqa: F401
+        import lightgbm  # noqa: F401
+        import catboost  # noqa: F401
         import skops.io  # noqa: F401
 
 

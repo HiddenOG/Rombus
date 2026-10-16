@@ -279,11 +279,12 @@ def _models(session, algorithms):
 def _constructor(model) -> str:
     """How a model is written in code. XGBoost's own printout lists every possible setting, so it's
     written with the settings the app actually uses."""
-    from app.tools.model import XGB_SETTINGS
+    from app.tools.model import WRITTEN_SETTINGS
     name = type(model).__name__
-    if name.startswith("XGB"):
+    family = next((f for f in WRITTEN_SETTINGS if name.startswith(f)), None)
+    if family:  # XGBoost, LightGBM, CatBoost: their own printouts list every possible setting (or none)
         extra = {"eval_metric": "logloss"} if name == "XGBClassifier" else {}
-        return f"{name}({', '.join(f'{k}={v!r}' for k, v in {**XGB_SETTINGS, **extra}.items())})"
+        return f"{name}({', '.join(f'{k}={v!r}' for k, v in {**WRITTEN_SETTINGS[family], **extra}.items())})"
     if name == "Pipeline":  # scaler + model: written the way people write it
         return f"make_pipeline({', '.join(_constructor(step) for _, step in model.steps)})"
     return " ".join(repr(model).split())  # one line, however sklearn wraps it
@@ -308,7 +309,8 @@ def _sklearn_imports(session, algorithms) -> str:
             if cls.__name__ == "Pipeline":
                 imports.setdefault("sklearn.pipeline", set()).add("make_pipeline")
                 continue
-            module = "xgboost" if cls.__module__.startswith("xgboost") else cls.__module__.rsplit("._", 1)[0]
+            top = cls.__module__.split(".")[0]
+            module = top if top in ("xgboost", "lightgbm", "catboost") else cls.__module__.rsplit("._", 1)[0]
             imports.setdefault(module, set()).add(cls.__name__)
     return "\n".join(f"from {mod} import {', '.join(sorted(names))}" for mod, names in sorted(imports.items()))
 

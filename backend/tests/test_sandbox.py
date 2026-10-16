@@ -146,6 +146,23 @@ def test_accounts_only(session, monkeypatch):
     assert view(session, "result = 1")["success"]
 
 
+def test_by_default_a_server_never_runs_code_unprotected(monkeypatch, tmp_path):
+    """Nothing set on Railway once meant the unprotected local worker served the public. Now 'auto' picks
+    the hardened sandbox on any server, and keeps code off if it isn't there."""
+    monkeypatch.setattr(settings, "CODE_SANDBOX", "auto")
+    monkeypatch.setattr(settings, "SANDBOX_SOCKET", str(tmp_path / "missing.sock"))
+    monkeypatch.setattr(settings, "MODAL_TOKEN_ID", "")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    sandbox.reset()
+    status = sandbox.status()
+    assert status["enabled"] is False and "sandbox server isn't running" in status["reason"]
+    # On your own computer, auto is the local worker
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT")
+    monkeypatch.setattr(sandbox, "on_a_server", lambda: False)
+    sandbox.reset()
+    assert sandbox.status()["sandbox"] == "local"
+
+
 def test_hardened_without_its_server_falls_back_or_stays_off(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "CODE_SANDBOX", "hardened")
     monkeypatch.setattr(settings, "SANDBOX_SOCKET", str(tmp_path / "missing.sock"))

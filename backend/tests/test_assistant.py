@@ -132,6 +132,7 @@ def test_endpoint_remembers_the_conversation(tmp_path, monkeypatch):
     with TestClient(app, headers=H) as client:
         csv = "x,y\n" + "\n".join(f"{i},{i % 2}" for i in range(20))
         sid = client.post("/api/upload", files={"file": ("d.csv", csv.encode())}).json()["session_id"]
+        client.post("/api/action", json={"session_id": sid, "tool": "clean_only", "arguments": {}})
         r = client.post("/api/assist", json={"session_id": sid, "message": "describe the data"}).json()
         assert r["kind"] == "look" and r["code"] == "result = train.describe()"
         r = client.post("/api/assist", json={"session_id": sid, "message": "what does that do?"}).json()

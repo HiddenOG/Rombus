@@ -131,7 +131,7 @@ def test_automl_says_so_when_an_earlier_model_stays_the_default():
 def test_unknown_algorithms_are_named_and_long_names_work():
     s = DataSession(pd.DataFrame({"x": range(40), "y": [0, 1] * 20}), "d.csv")
     run(s, "select_target", column="y")
-    assert "Available" in execute_tool("train_models", s, {"algorithms": ["catboost"]})["message"]
+    assert "Available" in execute_tool("train_models", s, {"algorithms": ["tabnet"]})["message"]
     assert set(run(s, "train_models", algorithms=["Random Forest"])["evidence"]["results"][0]) >= {"model", "cv_mean"}
 
 

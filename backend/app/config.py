@@ -51,12 +51,13 @@ class Settings(BaseSettings):
 
     # Code cells (user- or AI-written Python). Code never runs inside the app: it runs in a sandbox
     # process (app/sandbox.py), chosen by CODE_SANDBOX:
+    #   auto      (default) hardened when on a server or in a container, local on your own computer
     #   local     your own machine: a separate worker with a time limit, no other protection
     #   hardened  a server: another user, memory/CPU limits, no network, no starting programs (Linux,
     #             the Dockerfile starts it); falls back to Modal if its self-test fails and Modal is set
     #   modal     a hosted Modal sandbox (MODAL_TOKEN_ID / MODAL_TOKEN_SECRET)
     ALLOW_CUSTOM_CODE: bool = True
-    CODE_SANDBOX: str = "local"
+    CODE_SANDBOX: str = "auto"  # auto: hardened on a server (Modal if that fails, else off), local on a PC
     CODE_FOR: str = "everyone"  # or "accounts": only notebooks in a signed-in account may run code
     CODE_TIME_LIMIT_SECONDS: int = 60  # per cell (training custom models gets 5x)
     CODE_MEMORY_MB: int = 2048

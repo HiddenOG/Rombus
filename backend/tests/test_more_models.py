@@ -61,6 +61,45 @@ def test_scaled_models_keep_the_scaler_inside():
     assert "make_pipeline(StandardScaler(), MLPRegressor(" in code_info(s, "train_models", {"algorithms": ["mlp"]})["code"]
 
 
+def houses_with_areas(n=600):
+    """Price depends strongly on the area: a text column with many values, which one-hot leaves out."""
+    rng = np.random.default_rng(3)
+    areas = [f"area_{i}" for i in range(150)]
+    premium = {a: rng.uniform(50, 200) for a in areas}
+    df = pd.DataFrame({"location": rng.choice(areas, n), "sqft": rng.uniform(500, 3000, n),
+                       "Unnamed: 1": rng.normal(size=n)})  # a name LightGBM can't take as it is
+    df["price"] = df.sqft * 0.05 + df.location.map(premium) + rng.normal(0, 5, n)
+    s = DataSession(df, "h.csv")
+    run(s, "select_target", column="price")
+    return s
+
+
+def test_lightgbm_takes_awkward_column_names():
+    s = houses_with_areas()
+    r = run(s, "train_models", algorithms=["LightGBM"])["evidence"]["results"][0]
+    assert r["model"] == "lgbm" and "cv_mean" in r
+
+
+def test_catboost_learns_from_a_text_column_the_others_leave_out():
+    s = houses_with_areas()
+    results = {r["model"]: r for r in run(s, "train_models", algorithms=["xgb", "catboost"])["evidence"]["results"]}
+    assert results["catboost"]["cv_mean"] > results["xgb"]["cv_mean"] + 0.2  # location carries most of the price
+    exam = run(s, "final_exam", algorithm="catboost")["message"]
+    assert "Final exam for catboost" in exam
+    prediction = run(s, "predict", algorithm="catboost", features={"location": "area_3", "sqft": 1200, "Unnamed: 1": 0})
+    assert "Prediction:" in prediction["message"]
+    assert "location" in [f["feature"] for f in run(s, "explain_model", algorithm="catboost")["evidence"]["chart_data"]]
+
+
+def test_a_downloaded_catboost_model_says_it_reads_text():
+    import pickle
+    from app.tools.model import model_bundle
+    s = houses_with_areas()
+    run(s, "train_models", algorithms=["catboost"])
+    bundle = pickle.loads(model_bundle(s, "catboost")[1])
+    assert bundle["reads_text"] and "location" in bundle["feature_names"]
+
+
 # ── Models cells: your own cross-validation and tuning ───────────────────────
 
 @pytest.fixture

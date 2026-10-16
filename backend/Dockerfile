@@ -14,8 +14,8 @@ ENV PYTHONUNBUFFERED=1 \
     MPLCONFIGDIR=/tmp/matplotlib \
     PORT=8000
 
-# libseccomp: the code sandbox uses it to take the network and starting programs away from code cells
-RUN apt-get update && apt-get install -y --no-install-recommends libseccomp2 && rm -rf /var/lib/apt/lists/*
+# libgomp: LightGBM's multithreading. libseccomp: the code sandbox uses it to take the network and starting programs away from code cells
+RUN apt-get update && apt-get install -y --no-install-recommends libseccomp2 libgomp1 && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /install /usr/local
 

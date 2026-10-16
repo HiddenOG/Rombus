@@ -605,6 +605,11 @@ def _request_with_context(session: DataSession, message: str) -> str:
 
 def system_prompt(session: DataSession) -> str:
     parts = [SYSTEM, LIBRARY_RULES]
+    if not session.can_explore:
+        parts.append("NOTHING IS CHOSEN YET: they haven't picked a column to predict or chosen to just clean. Until "
+                     "then statistics stay hidden (so the test rows can be locked away first) and NO code can run: "
+                     "never write a code cell. Answer from what's shown (row and column counts, column names and "
+                     "types), and suggest select_target or clean_only to go further.")
     if session.clean_only:
         parts.append("THIS NOTEBOOK ONLY CLEANS DATA: no target, no test rows, no models. Never write a MODELS "
                      "cell or suggest training; every step and CHANGE cell works on ALL the rows (no TRAIN_ONLY "
@@ -689,6 +694,11 @@ async def assist(session: DataSession, message: str) -> Dict[str, Any]:
         note = f"(I tried to propose a built-in step, but it doesn't fit: {answer['problem']}.)"
         return result | {"reply": f"{words}\n\n{note}".strip()}
     code = answer.get("code")
+    if code and not session.can_explore:
+        # A cell that can only fail with "first choose what to do" isn't offered: say what to do instead
+        code = None
+        words = (words + "\n\n" if words else "") + ("To run code on the data, first choose what to do with it "
+                                                     "(predict a column, or just clean it).")
     result["reply"] = words or ("Here's the code. Read it, edit it if you like, then run it." if code else "")
     if code:
         result |= {"code": code, "kind": cell_kind(code), "problem": answer.get("code_problem")}
