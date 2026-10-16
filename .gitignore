@@ -57,3 +57,6 @@ Thumbs.db
 
 # Evaluation outputs
 backend/evals/results/
+
+# CatBoost training logs (the app turns them off; a manual run may still write them)
+catboost_info/
