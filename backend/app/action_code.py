@@ -89,6 +89,25 @@ df = pd.read_csv({session.filename!r})
 ''')
 
 
+@builder("start_exploring")
+def _start_exploring(session, args):
+    share = args.get("share", 0.2)
+    share = share / 100 if share > 1 else share
+    by = args.get("seal_by")
+    if by:
+        seal = (f"# The most recent {share:.0%} by '{by}' are sealed\n"
+                f"order = pd.to_datetime(df[{by!r}], errors='coerce').dropna().sort_values(kind='stable').index\n"
+                f"sealed = df.loc[order[-int(np.ceil(len(df) * {share})):]]")
+    else:
+        seal = (f"# {share:.0%} of the rows, chosen at random, are sealed\n"
+                f"sealed = df.sample(n=int(np.ceil(len(df) * {share})), random_state=42)")
+    return HEADER + _code(f'''
+# Explore freely, with a sealed envelope: the sealed rows are never looked at. If a column is predicted
+# later, they're its test set, so its score is honest.
+df = pd.read_csv({session.filename!r})
+''') + "\n" + seal + "\nexplore = df.drop(index=sealed.index)  # every view, step and code cell works on these\n"
+
+
 @builder("preview_data")
 def _preview(session, args):
     rows = int(args.get("rows") or 5)

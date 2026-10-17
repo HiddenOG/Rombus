@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import * as api from '../lib/api';
+import { setModelNames } from '../lib/modelNames';
 import { CODE_KINDS, CODE_TEMPLATES } from '../lib/codeCells';
 
 const STORAGE_KEY = 'automl.notebooks.v1';
@@ -94,6 +95,7 @@ export function useNotebook() {
             try {
                 const [{ tools: list }, serverConfig] = await Promise.all([api.getTools(), api.getConfig()]);
                 setTools(Object.fromEntries(list.map(t => [t.name, t])));
+                setModelNames(serverConfig);
                 setConfig(serverConfig);
             } catch (err) {
                 setError(err.message);
@@ -155,7 +157,7 @@ export function useNotebook() {
             id: newId(),
             type: 'note',
             text: `Uploaded ${what}: ${data.summary.shape[0]} rows × ${data.summary.shape[1]} columns. ` +
-                'Choose what to do: predict a column, or just clean the data.',
+                'Choose what to do below, or just start: ask a question or run a cell.',
         }]);
         refreshNotebooks();
     });

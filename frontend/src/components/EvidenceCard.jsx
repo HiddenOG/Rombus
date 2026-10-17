@@ -1,5 +1,6 @@
 import React from 'react';
 import { Trophy, GraduationCap } from 'lucide-react';
+import { modelName } from '../lib/modelNames';
 import { ChartRenderer } from './ChartRenderer';
 
 /**
@@ -42,7 +43,7 @@ export function EvidenceCard({ evidence }) {
                     <div className="mt-1 text-2xl font-bold text-ink">{evidence.prediction}</div>
                     {evidence.model_used && (
                         <div className="mt-1 text-xs text-ink-3">
-                            Model: <span className="font-mono uppercase">{evidence.model_used}</span>
+                            Model: <span className="font-medium text-ink-2">{modelName(evidence.model_used)}</span>
                         </div>
                     )}
                     {evidence.probabilities && (
@@ -145,7 +146,7 @@ const asScore = (value, metric) => (value == null ? '–' : metric === 'accuracy
 
 function ExamCard({ exam }) {
     const rows = [
-        { label: `Model (${exam.model})`, value: exam.score, className: 'bg-brand-500' },
+        { label: `Model: ${modelName(exam.model)}`, value: exam.score, className: 'bg-brand-500' },
         { label: `Just guessing: ${exam.baseline_label}`, value: exam.baseline, className: 'bg-ink-3/50' },
         ...(exam.practice != null ? [{ label: 'Practice score (during training)', value: exam.practice, className: 'bg-brand-200' }] : []),
     ];
@@ -250,7 +251,7 @@ function ModelResults({ results, bestModel }) {
                     >
                         <div className="flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2">
-                                <span className="font-mono text-sm font-semibold uppercase text-ink">{r.model}</span>
+                                <span className="text-sm font-semibold text-ink" title={r.model}>{modelName(r.model)}</span>
                                 {isBest && (
                                     <span className="flex items-center gap-1 rounded-full bg-brand-500 px-2 py-0.5 text-[10px] font-bold uppercase text-white">
                                         <Trophy className="w-3 h-3" /> Best

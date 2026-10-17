@@ -86,6 +86,8 @@ When ONE of them does what was asked, don't write code: reply with one sentence 
 Write a ```python cell only when no built-in does it (a custom rule, an unusual chart, several steps
 at once that no single built-in covers). Never both in one reply. Settings: * means required;
 a|b|c means pick one of those.
+In your sentences, call built-ins by plain names ("a histogram", "fill the blanks with the median"), not
+their code names (plot_histogram, impute_missing): the step card shows the exact step.
 Don't ask whether to go ahead: the user's Run button is the confirmation. Ask a question only when
 the request can't be done without an answer (e.g. which of two columns they mean).
 A LOOK cell changes nothing: renaming, cleaning, dropping or adding columns must be a built-in step
@@ -148,9 +150,9 @@ def catalogue(session: DataSession) -> str:
         description = _first_sentence(spec["description"])
         lines.append(f"- {name}({', '.join(settings_)}): {description}")
     if "train_models" in library(session) and session.problem_type:
-        from app.tools.model import MODEL_NAMES
+        from app.tools.model import describe_models
         registry = CLASSIFICATION_MODELS if session.problem_type == "classification" else REGRESSION_MODELS
-        lines.append("  Model names: " + ", ".join(f"{k} = {MODEL_NAMES.get(k, k)}" for k in registry)
+        lines.append("  Model names: " + describe_models(registry)
                      + ". Anything else (deep learning, other libraries): a MODELS cell.")
     return "\n".join(lines)
 
@@ -252,7 +254,9 @@ def notebook_context(session: DataSession) -> str:
         mode = (f"predicting '{state['target']}' ({state['problem_type']}); {state['test_rows']} test rows locked away"
                 + (f", by time ('{state['time_column']}': the test rows are the most recent)" if state["time_column"] else ""))
     elif state["clean_only"]:
-        mode = "cleaning only: no target and no model; every step works on all rows"
+        mode = ("exploring, no column to predict yet: " + (
+            f"{len(session.df)} rows visible, {len(session.sealed['rows'])} sealed (hidden, never shown: the honest "
+            "test set if they predict a column later)" if session.sealed else "every row visible; no model"))
     else:
         mode = "not started: no target chosen yet, so only column names and types are known"
     columns = session.get_compact_column_summary() if session.can_explore else \

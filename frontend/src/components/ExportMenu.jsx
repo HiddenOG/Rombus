@@ -34,9 +34,20 @@ export function ExportMenu({ nb }) {
     };
 
     // Clean-only notebooks: no test rows and no model, so the export is simply the whole cleaned table
+    // With a sealed envelope, the visible rows are what's being explored; every row opens the envelope
+    const sealed = nb.summary?.sealed_rows || 0;
     const items = cleanOnly ? [
-        { icon: Table2, label: 'Cleaned data', text: 'Every row, after your steps, as CSV.', onClick: download('train', 'csv') },
-        { icon: FileSpreadsheet, label: 'Cleaned data (Excel)', text: 'Same, as an .xlsx file.', onClick: download('train', 'xlsx') },
+        {
+            icon: Table2, label: sealed ? 'Cleaned data (visible rows)' : 'Cleaned data',
+            text: sealed ? 'The rows you’re exploring, after your steps, as CSV.' : 'Every row, after your steps, as CSV.',
+            onClick: download('train', 'csv'),
+        },
+        { icon: FileSpreadsheet, label: sealed ? 'Cleaned data (visible rows, Excel)' : 'Cleaned data (Excel)', text: 'Same, as an .xlsx file.', onClick: download('train', 'xlsx') },
+        ...(sealed ? [{
+            icon: Table2, label: 'Every row, the sealed ones too',
+            text: `Opens the envelope: the ${sealed.toLocaleString()} sealed rows count as seen, so a later prediction’s score will say so.`,
+            onClick: download('all', 'csv'),
+        }] : []),
         {
             icon: FileCode2, label: 'Cleaning as a Python script',
             text: 'Your steps as one runnable .py file that cleans the original file the same way.',

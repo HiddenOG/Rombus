@@ -16,6 +16,9 @@ from app.session import DataSession
 def cleaned_rows(session: DataSession, which: str) -> pd.DataFrame:
     """'train': the cleaned training rows. 'all': training + locked test rows, the test rows cleaned
     with the training sticky notes (never learned from), labelled in a `split` column."""
+    if not session.is_split and session.sealed and which == "all":
+        # Every row, the sealed ones too: that opens the envelope (they've been seen from now on)
+        session.open_envelope()
     if which == "train" or not session.is_split:
         return session.df.copy()
     train = session.df.assign(split="train")

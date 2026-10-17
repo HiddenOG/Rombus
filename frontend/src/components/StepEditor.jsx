@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { modelHint, modelName, modelsFor } from '../lib/modelNames';
 
 const humanize = (s) => s.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
 
@@ -8,7 +9,7 @@ const isColumnField = (spec) => /column/i.test(spec.description || '');
  * StepEditor — a settings form generated from a tool's JSON schema.
  * Used to edit an existing step and to add a step by hand (no AI needed).
  */
-export function StepEditor({ tool, initialArgs = {}, columns = [], onSave, onCancel, saveLabel = 'Save & replay', busy }) {
+export function StepEditor({ tool, initialArgs = {}, columns = [], problemType = null, onSave, onCancel, saveLabel = 'Save & replay', busy }) {
     const properties = Object.entries(tool.parameters?.properties || {}).filter(([name]) => name !== 'explanation');
     const required = new Set(tool.parameters?.required || []);
     const [values, setValues] = useState(() =>
@@ -43,6 +44,7 @@ export function StepEditor({ tool, initialArgs = {}, columns = [], onSave, onCan
             {properties.map(([name, spec]) => (
                 <Field
                     key={name}
+                    problemType={problemType}
                     name={name}
                     spec={spec}
                     required={required.has(name)}
@@ -68,7 +70,7 @@ export function StepEditor({ tool, initialArgs = {}, columns = [], onSave, onCan
     );
 }
 
-function Field({ name, spec, required, value, columns, onChange }) {
+function Field({ name, spec, required, value, columns, problemType, onChange }) {
     const label = (
         <span className="mb-1 block text-xs font-semibold text-ink-2">
             {humanize(name)} {required ? <span className="text-brand-600">*</span> : <span className="font-normal text-ink-3">(optional)</span>}
@@ -89,7 +91,9 @@ function Field({ name, spec, required, value, columns, onChange }) {
     }
 
     if (spec.type === 'array') {
-        const options = spec.items?.enum || (isColumnField(spec) ? columns : null);
+        // Models: only the ones that fit this problem, by their readable names
+        const isModels = name === 'algorithms';
+        const options = isModels ? modelsFor(problemType) : spec.items?.enum || (isColumnField(spec) ? columns : null);
         if (options) {
             const chosen = new Set(value);
             const all = [...new Set([...options, ...value])];
@@ -101,12 +105,13 @@ function Field({ name, spec, required, value, columns, onChange }) {
                             <button
                                 type="button"
                                 key={o}
+                                title={isModels ? [modelHint(o), `code: ${o}`].filter(Boolean).join(' · ') : undefined}
                                 onClick={() => onChange(chosen.has(o) ? value.filter(v => v !== o) : [...value, o])}
                                 className={`rounded-lg border px-2 py-1 font-mono text-xs transition-colors ${
                                     chosen.has(o) ? 'border-brand-400 bg-brand-500 text-white' : 'border-line bg-surface text-ink-2 hover:border-brand-300'
                                 }`}
                             >
-                                {o}
+                                {isModels ? modelName(o) : o}
                             </button>
                         ))}
                     </div>

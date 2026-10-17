@@ -31,15 +31,15 @@ class TestBeforeLock:
         assert col == {"name": "age", "dtype": "int64"}
 
     def test_cleaning_without_choosing_starts_explore_mode(self, session):
-        """No forced choice: cleaning before picking a target explores all rows, and that's remembered
-        (a later final exam says the test rows were seen)."""
+        """No forced choice: cleaning before picking a target starts exploring (with a sealed envelope,
+        or all rows when the file is too small to seal)."""
         result = execute_tool("impute_all_missing", session, {})
-        assert result["success"] and result["message"].startswith("(Exploring all rows")
-        assert session.clean_only and session.explored_first and not session.is_split
+        assert result["success"] and result["message"].startswith("(Exploring ")
+        assert session.clean_only and not session.is_split and (session.sealed or session.explored_first)
 
     def test_charts_without_choosing_start_explore_mode(self, session):
         assert execute_tool("plot_histogram", session, {"column": "age"})["success"]
-        assert session.explored_first
+        assert session.clean_only
 
     def test_models_still_need_a_target(self, session):
         result = execute_tool("train_models", session, {})

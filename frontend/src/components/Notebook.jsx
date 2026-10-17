@@ -132,7 +132,7 @@ function CommandBar({ nb }) {
     // Just uploaded: a suggestion, not a gate. Predict a column, explore & clean, or skip and just start
     const [skipped, setSkipped] = useState({});
     const choosing = sessionId && summary && !summary.is_split && !summary.clean_only;
-    const suggesting = choosing && !skipped[sessionId];
+    const suggesting = choosing;
     const chooseTarget = () => { setToolName('select_target'); setAdding(true); setPredicting(false); };
     const submit = (e) => {
         e.preventDefault();
@@ -160,7 +160,8 @@ function CommandBar({ nb }) {
                             <p className="text-sm font-semibold text-ink">What would you like to do with this data?</p>
                             <button
                                 type="button"
-                                onClick={() => setSkipped(s => ({ ...s, [sessionId]: true }))}
+                                onClick={() => setSkipped(s => ({ ...s, [sessionId]: !s[sessionId] }))}
+                                aria-expanded={Boolean(skipped[sessionId])}
                                 className="shrink-0 rounded-lg px-2 py-0.5 text-xs font-semibold text-ink-3 hover:bg-surface hover:text-ink"
                             >
                                 Skip for now
@@ -177,15 +178,20 @@ function CommandBar({ nb }) {
                             <StartOption
                                 icon={Wand2}
                                 title="Explore & clean"
-                                text="No model yet: see every row, chart, clean and export. You can still predict a column later."
+                                text="See every row: chart, clean and export. Predicting later is possible, but its score will note you'd seen the rows."
                                 onClick={() => nb.run({ tool: 'clean_only', arguments: {} })}
                                 disabled={isProcessing}
                             />
                         </div>
-                        <p className="mt-2 px-1 text-[11px] leading-relaxed text-ink-3">
-                            Or just start: ask a question or run a cell. That explores all rows; if you predict a column
-                            later, its final score notes you'd seen them (choose it first for a fully honest score).
-                        </p>
+                        {skipped[sessionId] ? (
+                            <SealForm summary={summary} disabled={isProcessing}
+                                      onStart={(share, sealBy) => nb.run({ tool: 'start_exploring', arguments: { share, ...(sealBy ? { seal_by: sealBy } : {}) } })} />
+                        ) : (
+                            <p className="mt-2 px-1 text-[11px] leading-relaxed text-ink-3">
+                                Or just start: ask a question or run a cell. 20% of the rows are sealed first (never
+                                shown), so if you predict a column later, its score is still honest.
+                            </p>
+                        )}
                         <HeaderRow summary={summary} onApply={nb.setHeaderRow} disabled={isProcessing} />
                     </div>
                 )}
@@ -214,6 +220,7 @@ function CommandBar({ nb }) {
                             <select
                                 value={toolName}
                                 onChange={e => setToolName(e.target.value)}
+                                aria-label="Step to add"
                                 className="flex-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-ink outline-none focus:border-brand-300"
                             >
                                 <option value="">Choose a step…</option>
@@ -232,6 +239,7 @@ function CommandBar({ nb }) {
                                     key={toolName}
                                     tool={tools[toolName]}
                                     columns={summary?.columns?.map(c => c.name) || []}
+                                    problemType={summary?.problem_type}
                                     saveLabel="Run"
                                     busy={isProcessing}
                                     onCancel={() => setAdding(false)}
@@ -300,6 +308,62 @@ function CommandBar({ nb }) {
  * HeaderRow — "the column names are on row N" for spreadsheets with a title above the table. Counted
  * the way Excel numbers rows. Stands out when most names came out empty (Unnamed: 1, Unnamed: 2…).
  */
+/**
+ * SealForm — "Skip for now": explore freely, choosing how many rows stay sealed (never shown) in case a
+ * column is predicted later; sealed at random, or the most recent rows by a date column (for time data).
+ */
+function SealForm({ summary, onStart, disabled }) {
+    const [share, setShare] = useState('20');
+    const [by, setBy] = useState('');
+    const dates = summary?.date_columns ?? [];
+    const rows = summary?.shape?.[0] ?? 0;
+    const n = Number(share);
+    const valid = Number.isFinite(n) && n >= 5 && n <= 50;
+    const sealedRows = valid ? Math.ceil(rows * n / 100) : 0;
+    const start = (e) => { e.preventDefault(); if (valid) onStart(n / 100, by || null); };
+
+    return (
+        <form onSubmit={start} className="mt-2.5 space-y-2 rounded-xl border border-line bg-surface px-3 py-2.5 text-xs text-ink-2 animate-in">
+            <p className="font-semibold text-ink">Explore freely, with some rows sealed</p>
+            <p className="text-ink-3">
+                Sealed rows are never shown. If you predict a column later, they become its test set, so its score is honest.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1.5">
+                    Keep
+                    <input
+                        type="number" min={5} max={50} inputMode="numeric" value={share}
+                        onChange={e => setShare(e.target.value)}
+                        aria-label="Percent of rows to seal"
+                        className="w-14 rounded-lg border border-line bg-surface-2 px-2 py-1 text-ink outline-none focus:border-brand-400"
+                    />
+                    % sealed
+                </label>
+                {dates.length > 0 && (
+                    <label className="flex items-center gap-1.5">
+                        chosen
+                        <select
+                            value={by} onChange={e => setBy(e.target.value)} aria-label="How sealed rows are chosen"
+                            className="rounded-lg border border-line bg-surface-2 px-2 py-1 text-ink outline-none focus:border-brand-400"
+                        >
+                            <option value="">at random</option>
+                            {dates.map(d => <option key={d} value={d}>the most recent by {d}</option>)}
+                        </select>
+                    </label>
+                )}
+                <span className="text-ink-3">{valid ? `${sealedRows.toLocaleString()} of ${rows.toLocaleString()} rows` : 'between 5 and 50%'}</span>
+                <span className="flex-1" />
+                <button
+                    type="submit" disabled={disabled || !valid}
+                    className="rounded-lg bg-brand-500 px-3 py-1.5 font-semibold text-white hover:bg-brand-600 disabled:opacity-50"
+                >
+                    Start exploring
+                </button>
+            </div>
+        </form>
+    );
+}
+
 function HeaderRow({ summary, onApply, disabled }) {
     const [row, setRow] = useState('');
     const names = summary?.columns?.map(c => String(c.name)) ?? [];

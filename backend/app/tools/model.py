@@ -1,6 +1,7 @@
 """Model tools — training, prediction, AutoML, and SHAP explanations."""
 
 import copy
+import re
 import pandas as pd
 import numpy as np
 import pickle
@@ -118,21 +119,31 @@ REGRESSION_MODELS = {
 
 # What each short name means (for the assistant, the step's description and error messages)
 MODEL_NAMES = {
-    "lr": "logistic regression", "ridge_clf": "ridge classifier", "sgd": "stochastic gradient descent (linear)",
+    "lr": "logistic regression", "ridge_clf": "ridge classifier", "sgd": "SGD (linear)",
     "nb": "Gaussian naive Bayes", "lda": "linear discriminant analysis", "qda": "quadratic discriminant analysis",
     "knn": "k-nearest neighbours", "svc": "linear SVM", "svc_rbf": "RBF-kernel SVM",
     "dt": "decision tree", "rf": "random forest", "et": "extra trees", "gb": "gradient boosting",
-    "hgb": "histogram gradient boosting (fast, handles blanks)", "ada": "AdaBoost", "bag": "bagging",
-    "xgb": "XGBoost", "lgbm": "LightGBM", "catboost": "CatBoost (uses text columns like location directly)",
-    "mlp": "neural network (multilayer perceptron)",
+    "hgb": "histogram gradient boosting", "ada": "AdaBoost", "bag": "bagging",
+    "xgb": "XGBoost", "lgbm": "LightGBM", "catboost": "CatBoost", "mlp": "neural network",
     "linear": "linear regression", "ridge": "ridge", "lasso": "lasso", "elasticnet": "elastic net",
-    "bayesian_ridge": "Bayesian ridge", "huber": "Huber (robust to outliers)", "poly": "polynomial (degree 2) + ridge",
+    "bayesian_ridge": "Bayesian ridge", "huber": "Huber", "poly": "polynomial (degree 2)",
     "svr": "linear SVR", "svr_rbf": "RBF-kernel SVR",
+}
+# A word on what makes some of them different (for the assistant, and tooltips)
+MODEL_HINTS = {
+    "sgd": "stochastic gradient descent", "hgb": "fast, handles blanks", "catboost": "uses text columns like location directly",
+    "mlp": "multilayer perceptron", "huber": "robust to outliers", "poly": "squared terms, then ridge",
+    "svc_rbf": "curved boundaries", "svr_rbf": "curved relationships", "et": "like random forest, more random splits",
 }
 
 
+def shown(name) -> str:
+    """A model as people read it: "lr" -> "logistic regression (lr)"; a name they chose stays as it is."""
+    return f"{MODEL_NAMES[name]} ({name})" if name in MODEL_NAMES else str(name)
+
+
 def describe_models(registry) -> str:
-    return ", ".join(f"{k} ({MODEL_NAMES.get(k, k)})" for k in registry)
+    return ", ".join(f"{k} ({MODEL_NAMES.get(k, k)}{': ' + MODEL_HINTS[k] if k in MODEL_HINTS else ''})" for k in registry)
 
 
 # AutoML param grids
@@ -387,8 +398,31 @@ def ensure_practice_split(session: DataSession) -> str:
     if skipped:
         notes.append(f"Not used as model inputs: {skipped} (dates, or text with over {MAX_AUTO_ONEHOT} values; "
                      "CatBoost does use such text columns)")
-    return (f"(Made a practice split first: {len(session.X_train)} rows to learn from, {len(session.X_test)} to "
-            f"check against{'; ' + '. '.join(notes) if notes else ''}.)")
+    message = (f"(Made a practice split first: {len(session.X_train)} rows to learn from, {len(session.X_test)} to "
+               f"check against{'; ' + '. '.join(notes) if notes else ''}.)")
+    ids = id_like_columns(session.df, session.target_column)
+    if ids:
+        message += (f" Tip: {', '.join(map(repr, ids))} looks like a row number (a different whole number on every row): "
+                    "it says nothing real about each row, and a model may still find a fake pattern in it. Consider "
+                    "removing it (Remove columns).")
+    return message
+
+
+def id_like_columns(df: pd.DataFrame, target: str) -> List[str]:
+    """Number columns that look like row IDs: a different whole number on every row, and a name like an
+    ID or values counting up (PassengerId, CustomerID, row_no...)."""
+    found = []
+    for col in df.columns:
+        if col == target or not pd.api.types.is_numeric_dtype(df[col]) or pd.api.types.is_bool_dtype(df[col]):
+            continue
+        values = df[col].dropna()
+        if len(values) < 20 or values.nunique() != len(values) or not (values % 1 == 0).all():
+            continue
+        named = re.search(r"(^|_|\b)(id|no|num|number|index|key)$|id$|^id", str(col), re.I)
+        counting = values.is_monotonic_increasing or values.sort_values().diff().dropna().eq(1).mean() > 0.9
+        if named or counting:
+            found.append(col)
+    return found
 
 
 def safe_cv_folds(session: DataSession, requested: int) -> int:
@@ -514,7 +548,7 @@ def train_models(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     results = [fit_and_score(session, alg, model_registry[alg](), cv_folds) for alg in alg_names]
 
     best = finish_training(session, results)
-    msg = f"Trained {len(results)} model{'s' if len(results) != 1 else ''}. Best on the practice split: {best}."
+    msg = f"Trained {len(results)} model{'s' if len(results) != 1 else ''}. Best on the practice split: {shown(best)}."
     if auto_split:
         msg = f"{auto_split} {msg}"
     if stand_ins:
@@ -568,7 +602,7 @@ def auto_ml(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": False,
                 "message": "AutoML couldn't fit any model: " + "; ".join(f"{r['model']}: {r['error']}" for r in results)}
     overall = best_model_name(session)
-    msg = f"AutoML complete. Best tuned model: {best} (CV score: {session.model_results[best]['cv_mean']:.4f})."
+    msg = f"AutoML complete. Best tuned model: {shown(best)} (CV score: {session.model_results[best]['cv_mean']:.4f})."
     if overall == best:
         msg += " It's now the default for explain, predict and the final exam."
     else:
@@ -652,7 +686,7 @@ def final_exam(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
 
     exam["no_better_than_guessing"] = exam["score"] <= exam["baseline"] + 0.01
     msg = (
-        f"Final exam for {name}: {exam['metric']} {exam['score']} on {exam['test_rows']} locked rows it never saw "
+        f"Final exam for {shown(name)}: {exam['metric']} {exam['score']} on {exam['test_rows']} locked rows it never saw "
         f"(baseline, {exam['baseline_label']}: {exam['baseline']})."
     )
     if exam["no_better_than_guessing"]:
@@ -725,7 +759,7 @@ def predict(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
         labels = [classes[int(c)] if classes is not None and 0 <= int(c) < len(classes) else c for c in model.classes_]
         probabilities = {str(label): round(float(p), 4) for label, p in zip(labels, model.predict_proba(X)[0])}
 
-    msg = f"Prediction: {prediction} (using {model_name})."
+    msg = f"Prediction: {prediction} (using {shown(model_name)})."
     if probabilities:
         msg += f" Confidence: {probabilities.get(str(prediction), 0):.0%}."
     if missing:
@@ -774,7 +808,7 @@ def explain_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
 
             return {
                 "success": True,
-                "message": f"Feature importance for {model_name}.",
+                "message": f"Feature importance for {shown(model_name)}.",
                 "evidence": {
                     "chart_type": "bar",
                     "chart_data": importance_data[:15],
@@ -798,7 +832,7 @@ def explain_model(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
 
             return {
                 "success": True,
-                "message": f"Permutation importance for {model_name}.",
+                "message": f"Permutation importance for {shown(model_name)}.",
                 "evidence": {
                     "chart_type": "bar",
                     "chart_data": importance_data[:15],

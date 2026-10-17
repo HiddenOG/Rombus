@@ -126,28 +126,29 @@ def test_not_after_a_target_is_chosen():
     assert "already predicts" in execute_tool("clean_only", s, {})["message"]
 
 
-# ── No forced choice: just start working, and it's explore mode ───────────────
+# ── No forced choice (the sealed envelope is tested in test_sealed_envelope.py) ───────
 
-def test_starting_to_work_without_choosing_enters_explore_mode():
-    s = DataSession(call_list(), "Customer Call List.xlsx")
+def test_a_small_file_explores_all_rows_and_says_why():
+    s = DataSession(call_list(), "Customer Call List.xlsx")  # 23 rows: too few to seal
     result = execute_tool("remove_duplicates", s, {})
-    assert result["success"] and result["started_exploring"] and result["message"].startswith("(Exploring all rows")
-    assert s.clean_only and s.explored_first and len(s.df) == 20
-    # Models still need a column to predict
+    assert result["success"] and result["started_exploring"] and result["message"].startswith("(Exploring all 23 rows")
+    assert s.clean_only and s.explored_first and s.sealed is None and len(s.df) == 20
     assert "Models need a column to predict" in execute_tool("train_models", DataSession(call_list(), "c.csv"), {})["message"]
 
 
-def test_a_score_after_exploring_first_says_so():
+def test_explore_and_clean_then_predicting_carries_the_note():
+    """Explore & clean shows every row (no envelope): a later final exam says so. Choosing the
+    target first has no such note."""
     rng = np.random.default_rng(0)
     df = pd.DataFrame({"x": rng.normal(size=120), "z": rng.normal(size=120)})
     df["y"] = df.x * 2 + rng.normal(size=120)
     s = DataSession(df, "e.csv")
-    run(s, "plot_histogram", column="x")          # just looking around first
+    run(s, "clean_only")
     run(s, "select_target", column="y")
     run(s, "train_models", algorithms=["linear"])
     exam = run(s, "final_exam")
     assert "explored before they were locked away" in exam["message"] and exam["evidence"]["exam"]["explored_first"]
-    fresh = DataSession(df, "e.csv")               # choosing the target first: no such note
+    fresh = DataSession(df, "e.csv")
     run(fresh, "select_target", column="y")
     run(fresh, "train_models", algorithms=["linear"])
     assert "explored before" not in run(fresh, "final_exam")["message"]

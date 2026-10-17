@@ -63,6 +63,9 @@ NEEDS_TARGET: Set[str] = {"train_test_split", "train_models", "auto_ml", "final_
                           "explain_model", "save_model", "custom_models"}
 
 
+DEFAULT_SEAL = 0.2  # rows sealed when someone starts exploring without choosing
+
+
 def available_tools(session: DataSession) -> List[str]:
     """Tools the session may use right now."""
     if session.is_split:
@@ -91,12 +94,11 @@ def execute_tool(tool_name: str, session: DataSession, args: Dict[str, Any]) -> 
                 "message": "Models need a column to predict: choose it with Predict a column (Select target), "
                            "which locks away the test rows first so the final score is honest.",
             }
-        # Nothing chosen yet, and they've started working: that's exploring. No gate, but the notebook
-        # remembers it (a later final exam says the test rows were seen while exploring)
-        session.start_clean_only()
+        # Nothing chosen yet, and they've started working: that's exploring. No gate: a share of the rows
+        # is sealed first (the default 20%), so a column predicted later still gets an honest test set
+        started = session.start_exploring(DEFAULT_SEAL)
         result = execute_tool(tool_name, session, args)
-        result["message"] = ("(Exploring all rows: no column to predict yet. You can still choose one later.) "
-                             + str(result.get("message", "")))
+        result["message"] = f"({started}) " + str(result.get("message", ""))
         result["started_exploring"] = True
         return result
 

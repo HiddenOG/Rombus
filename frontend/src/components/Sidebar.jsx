@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { Upload, FileSpreadsheet, Layers, Sparkles, Undo2, Lock, Target, Boxes, NotebookPen, Plus, Trash2, PanelLeftClose, ChevronRight } from 'lucide-react';
 import { Logo } from './Logo';
 import { ConfirmDialog } from './ConfirmDialog';
+import { modelName } from '../lib/modelNames';
 import { AccountPanel } from './AccountPanel';
 
 /**
@@ -249,6 +250,16 @@ function DatasetOverview({ summary }) {
                             <span className="text-ink-3">Not chosen yet</span>
                         )}
                     </InfoRow>
+                    {summary?.sealed_rows > 0 && (
+                        <InfoRow icon={Lock} label="Sealed">
+                            <span
+                                className="font-medium text-ink-2"
+                                title="Never shown: if you predict a column later, these rows are its test set, so its score is honest"
+                            >
+                                {summary.sealed_rows.toLocaleString()} rows ({Math.round(summary.sealed_share * 100)}%)
+                            </span>
+                        </InfoRow>
+                    )}
                     {summary?.problem_type && (
                         <InfoRow icon={Boxes} label="Problem">
                             <span className="font-medium text-ink capitalize">{summary.problem_type}</span>
@@ -256,7 +267,7 @@ function DatasetOverview({ summary }) {
                     )}
                     {summary?.trained_models?.length > 0 && (
                         <InfoRow icon={Sparkles} label="Models">
-                            <span className="font-mono text-xs text-ink uppercase">{summary.trained_models.join(', ')}</span>
+                            <span className="text-right text-xs font-medium text-ink">{summary.trained_models.map(modelName).join(', ')}</span>
                         </InfoRow>
                     )}
                 </div>

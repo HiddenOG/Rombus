@@ -85,7 +85,7 @@ def test_catboost_learns_from_a_text_column_the_others_leave_out():
     results = {r["model"]: r for r in run(s, "train_models", algorithms=["xgb", "catboost"])["evidence"]["results"]}
     assert results["catboost"]["cv_mean"] > results["xgb"]["cv_mean"] + 0.2  # location carries most of the price
     exam = run(s, "final_exam", algorithm="catboost")["message"]
-    assert "Final exam for catboost" in exam
+    assert "Final exam for CatBoost (catboost)" in exam
     prediction = run(s, "predict", algorithm="catboost", features={"location": "area_3", "sqft": 1200, "Unnamed: 1": 0})
     assert "Prediction:" in prediction["message"]
     assert "location" in [f["feature"] for f in run(s, "explain_model", algorithm="catboost")["evidence"]["chart_data"]]
@@ -196,3 +196,23 @@ def test_clustering_in_clean_only_mode_and_the_exported_script(tmp_path):
     assert done.returncode == 0, done.stderr
     exported = pd.read_csv(tmp_path / "b_clean.csv")
     assert (exported["cluster"].to_numpy() == s.df["cluster"].to_numpy()).all()  # exactly what the app did
+
+
+def test_a_row_id_column_gets_a_tip_when_training():
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"PassengerId": range(1, 201), "age": rng.integers(1, 80, 200).astype(float),
+                       "zip_code": rng.permutation(np.arange(10000, 10200)) * 7})
+    df["y"] = df.age * 2 + rng.normal(size=200)
+    s = DataSession(df, "p.csv")
+    run(s, "select_target", column="y")
+    message = run(s, "train_models", algorithms=["linear"])["message"]
+    assert "'PassengerId' looks like a row number" in message and "zip_code" not in message
+
+
+def test_the_server_sends_readable_model_names():
+    from fastapi.testclient import TestClient
+    from app import app
+    with TestClient(app) as client:
+        config = client.get("/api/config").json()
+    assert config["model_names"]["lr"] == "logistic regression" and "svr" in config["models_for"]["regression"]
+    assert "svr" not in config["models_for"]["classification"]

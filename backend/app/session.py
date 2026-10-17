@@ -30,6 +30,9 @@ def whole_number_target(df: pd.DataFrame, target: str) -> pd.DataFrame:
     return df
 
 
+# Fewer rows than this: no sealed envelope (its test set would be too small to mean much)
+MIN_ROWS_TO_SEAL = 100
+
 class DataSession:
     """Represents a single user data science session."""
 
@@ -77,6 +80,9 @@ class DataSession:
         # Everything (every row) was looked at before a target was chosen: a later final exam says so,
         # since the test rows were seen while exploring
         self.explored_first = False
+        # The sealed envelope ({'rows': [...], 'by': date column or None, 'share': 0.2}): rows set aside
+        # at the start of exploring, never shown; the test set if a column is predicted later
+        self.sealed: Optional[Dict[str, Any]] = None
         self.created_at = time.time()
         self.updated_at = time.time()
 
@@ -288,14 +294,56 @@ class DataSession:
         return f"Column names taken from row {row}: {shown}. The table now has {table.shape[0]} rows and {table.shape[1]} columns."
 
     def start_clean_only(self) -> None:
-        """Work on all the rows, without a target or a model."""
+        """Work on all the rows, without a target or a model (and without a sealed envelope: if a column
+        is predicted later, its final exam says every row had been seen)."""
         if self.is_split:
             raise ValueError("This notebook already predicts a column, so its test rows stay locked. "
                              "Start a new notebook from the same file to clean it without a model.")
         self.clean_only = True
         self.explored_first = True
+        self.sealed = None
         self.raw_train = self.original_df.copy()
         self._set_recipe(self.recipe)
+
+    def start_exploring(self, share: float, seal_by: Optional[str] = None) -> str:
+        """Explore freely, with a share of the rows sealed in an envelope nobody sees: if a column is
+        predicted later, the sealed rows become its test set, so the final score is fully honest.
+        Sealed at random, or the most recent rows by a date column (so a later time split is honest too).
+        Returns a one-line description for the person."""
+        from app.expressions import as_dates, looks_like_dates
+        if self.is_split:
+            raise ValueError("This notebook already predicts a column, so its test rows are already locked.")
+        rows = len(self.original_df)
+        if rows < MIN_ROWS_TO_SEAL:
+            self.start_clean_only()
+            return (f"Exploring all {rows} rows: with fewer than {MIN_ROWS_TO_SEAL}, a sealed test set would be "
+                    "too small to mean much. To predict a column with an honest score, choose it first.")
+        n = max(1, int(np.ceil(rows * share)))
+        if seal_by:
+            if seal_by not in self.original_df.columns:
+                raise ValueError(f"Column '{seal_by}' not found.")
+            if not looks_like_dates(self.original_df[seal_by]):
+                raise ValueError(f"'{seal_by}' doesn't look like dates, so it can't say which rows are most recent.")
+            times = as_dates(self.original_df[seal_by])
+            sealed = times[times.notna()].sort_values(kind="stable").index[-n:]
+        else:
+            sealed = pd.Index(np.random.default_rng(42).choice(self.original_df.index, size=n, replace=False))
+        self.sealed = {"rows": sorted(int(i) for i in sealed), "by": seal_by, "share": share}
+        self.clean_only = True
+        self.explored_first = False
+        self.raw_train = self.original_df.drop(index=sealed).reset_index(drop=True)
+        self._set_recipe(self.recipe)
+        how = f"the most recent by '{seal_by}'" if seal_by else "chosen at random"
+        return (f"Exploring {len(self.raw_train):,} of {rows:,} rows. {n:,} rows ({share:.0%}, {how}) are sealed: "
+                "nobody sees them, so if you predict a column later they're its test set and its score is honest.")
+
+    def open_envelope(self) -> None:
+        """The sealed rows were shown (an export of all rows): from now on they count as seen."""
+        if self.sealed and not self.is_split:
+            self.sealed = None
+            self.explored_first = True
+            self.raw_train = self.original_df.copy()
+            self._set_recipe(self.recipe)
 
     def lock_test_rows(self, test_size: float) -> int:
         """Set aside test rows from the original data; self.df becomes the training rows.
@@ -323,6 +371,28 @@ class DataSession:
         from sklearn.model_selection import train_test_split
 
         full = whole_number_target(self.original_df.dropna(subset=[self.target_column]), self.target_column)
+
+        if self.sealed:
+            # The envelope: the sealed rows are the test set, whatever was asked (and on every re-lock),
+            # because they're the only rows nobody has seen
+            if self.time_column and self.time_column != self.sealed["by"]:
+                how = f"by '{self.sealed['by']}'" if self.sealed["by"] else "at random"
+                raise ValueError(f"The sealed rows were chosen {how}, so a time split by '{self.time_column}' would "
+                                 "test on rows you've explored. Use a random split, or start a new notebook and "
+                                 "choose the time split first.")
+            is_test = full.index.isin(self.sealed["rows"])
+            train, test = full[~is_test], full[is_test]
+            if self.time_column:
+                from app.expressions import as_dates
+                train = train.loc[as_dates(train[self.time_column]).sort_values(kind="stable").index]
+                test = test.loc[as_dates(test[self.time_column]).sort_values(kind="stable").index]
+            if len(test) == 0 or len(train) == 0:
+                raise ValueError("No rows with an answer in this column are left on one side of the seal.")
+            dropped = len(self.original_df) - len(full)
+            self.raw_train, self.test_df = train.reset_index(drop=True), test.reset_index(drop=True)
+            self.df = self.raw_train.copy()
+            self.test_size = self.sealed["share"]
+            return dropped
 
         if self.time_column:
             # Time mode: oldest rows train, the most recent share is locked away as the test set.
@@ -408,7 +478,21 @@ class DataSession:
             "undo_count": self.undo_count,
             "trained_models": list(self.trained_models.keys()),
             "columns": columns,
+            # The envelope while exploring: how many rows are sealed (hidden), and how they were chosen
+            "sealed_rows": len(self.sealed["rows"]) if self.sealed and not self.is_split else 0,
+            "sealed_share": self.sealed["share"] if self.sealed else None,
+            "sealed_by": self.sealed["by"] if self.sealed else None,
+            "explored_first": self.explored_first,
+            # Before anything is chosen: date columns that could order a seal of the most recent rows
+            "date_columns": self.date_columns() if not self.can_explore else [],
         }
+
+    def date_columns(self) -> List[str]:
+        from app.expressions import looks_like_dates
+        sample = self.original_df.head(500)
+        return [str(c) for c in sample.columns
+                if pd.api.types.is_datetime64_any_dtype(sample[c]) or (sample[c].dtype == object or
+                    pd.api.types.is_string_dtype(sample[c])) and looks_like_dates(sample[c])]
 
     def get_compact_column_summary(self) -> str:
         """Get a compact text summary of all columns for Gemini prompts."""
@@ -526,6 +610,7 @@ class SessionManager:
             "clean_only": int(session.clean_only),
             "time_column": session.time_column,
             "explored_first": int(session.explored_first),
+            "sealed": json.dumps(session.sealed) if session.sealed else None,
         })
 
     def _load_session(self, session_id: str) -> Optional[DataSession]:
@@ -553,6 +638,7 @@ class SessionManager:
             session.owner = row["owner"]
             session.time_column = row.get("time_column")
             session.explored_first = bool(row.get("explored_first"))
+            session.sealed = json.loads(row["sealed"]) if row.get("sealed") else None
             lines = [Line(s["tool"], s["args"], **({"id": s["id"]} if "id" in s else {}))
                      for s in json.loads(row["recipe"] or "[]")]
 
@@ -564,9 +650,14 @@ class SessionManager:
                 session._set_recipe(lines)
                 session.models_cleared = False
             elif row.get("clean_only"):
-                # Clean-only: the rows to clean are simply the original upload (no second copy stored)
+                # Exploring: the rows are the original upload, minus the sealed ones if there's an envelope
                 session.recipe = lines
-                session.start_clean_only()
+                if session.sealed:
+                    session.clean_only = True
+                    session.raw_train = session.original_df.drop(index=session.sealed["rows"]).reset_index(drop=True)
+                    session._set_recipe(lines)
+                else:
+                    session.start_clean_only()
                 session.models_cleared = False
 
             # What's in storage now matches memory: nothing to upload until it changes

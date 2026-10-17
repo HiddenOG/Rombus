@@ -48,6 +48,7 @@ sessions_table = Table(
     Column("clean_only", Integer),
     Column("time_column", Text),
     Column("explored_first", Integer),
+    Column("sealed", Text),
 )
 
 

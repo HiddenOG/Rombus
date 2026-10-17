@@ -98,9 +98,14 @@ def select_target(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     which = f"the most recent {len(session.test_df)} rows by '{time_column}'" if time_column else f"{len(session.test_df)} rows"
     msg = (
         f"Target set to '{col}' ({session.problem_type}, {session.original_df[col].nunique()} unique values). "
-        f"Locked away {which} ({test_size:.0%}) as the final test set; "
+        f"Locked away {which} ({session.test_size:.0%}) as the final test set; "
         f"working with {len(session.df)} training rows."
     )
+    if session.sealed:
+        msg += " These are the rows sealed when you started exploring: nobody has seen them, so the final score is honest."
+        if abs(test_size - session.sealed["share"]) > 1e-9 and args.get("test_size") is not None:
+            msg += (f" (You asked for {test_size:.0%}; the test set is the sealed {session.sealed['share']:.0%}, "
+                    "because any other rows have been explored.)")
     if time_column:
         from app.expressions import as_dates
         cutoff = as_dates(session.test_df[time_column]).min()
@@ -134,6 +139,22 @@ def clean_only(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
                    "later, choose the column to predict: the test rows are then locked from the original data "
                    "and your cleaning steps replay on the training rows, so nothing leaks.",
     }
+
+
+@register_tool(
+    "start_exploring",
+    "Explore freely with no column to predict yet, keeping a share of rows sealed (never shown): if a column "
+    "is predicted later, the sealed rows are its test set, so its score is honest.",
+    {"share": {"type": "number", "description": "Share of rows to seal, 0.05 to 0.5 (or 5 to 50%), default 0.2."},
+     "seal_by": {"type": "string", "description": "Optional date column: seal the MOST RECENT rows (for time data)."}},
+    before_split=True,
+    kind="action",
+)
+def start_exploring(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
+    message = session.start_exploring(parse_test_size(args.get("share", DEFAULT_TEST_SIZE)), args.get("seal_by") or None)
+    if session.current_stage == "ACQUIRE":
+        session.current_stage = "SCRUB"
+    return {"success": True, "message": message}
 
 
 MAX_PREVIEW_ROWS = 200

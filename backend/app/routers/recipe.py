@@ -118,7 +118,10 @@ async def export(session_id: str, what: str = "train", format: str = "csv", algo
                 raise HTTPException(status_code=400, detail="Choose the target (or Clean only) first: the pipeline starts there.")
             return pipeline_script(session).encode("utf-8"), "text/x-python", f"{stem}_pipeline.py"
         if what in ("train", "all") and format in ("csv", "xlsx"):
+            sealed_before = bool(session.sealed) and not session.is_split
             body, media = to_file(cleaned_rows(session, what), format)
+            if sealed_before and not session.sealed:  # the export showed the sealed rows: remember that
+                session_manager.save(session)
             return body, media, f"{stem}_{'train_clean' if what == 'train' else 'all_clean'}.{format}"
         raise HTTPException(status_code=400, detail="Export what=train|all|script|model, format=csv|xlsx.")
 

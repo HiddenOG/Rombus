@@ -264,6 +264,7 @@ export function RunCell({ cell, number, tool, step, summary, sessionId, isProces
                             tool={tool}
                             initialArgs={args}
                             columns={columns}
+                            problemType={summary?.problem_type}
                             busy={isProcessing}
                             onSave={save}
                             onCancel={() => setEditing(false)}
