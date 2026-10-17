@@ -47,7 +47,8 @@ def custom_view(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     evidence = sandbox.run({"kind": "view", "code": args.get("code") or "", "frames": {"train": session.df}})["evidence"]
     if not evidence:
         return {"success": True, "message": "Your code ran but showed nothing. Set `result`, print(), or draw a chart."}
-    return {"success": True, "message": "Custom view ran on the training rows.", "evidence": evidence}
+    rows = "all the rows" if session.clean_only else "the training rows"
+    return {"success": True, "message": f"Custom view ran on {rows}.", "evidence": evidence}
 
 
 @register_tool(

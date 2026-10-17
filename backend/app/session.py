@@ -74,6 +74,9 @@ class DataSession:
         # Time mode: rows are ordered by this column and the test rows are the LATEST ones, so a model
         # is always tested on a future it hasn't seen (a random split would let it peek between days)
         self.time_column: Optional[str] = None
+        # Everything (every row) was looked at before a target was chosen: a later final exam says so,
+        # since the test rows were seen while exploring
+        self.explored_first = False
         self.created_at = time.time()
         self.updated_at = time.time()
 
@@ -290,6 +293,7 @@ class DataSession:
             raise ValueError("This notebook already predicts a column, so its test rows stay locked. "
                              "Start a new notebook from the same file to clean it without a model.")
         self.clean_only = True
+        self.explored_first = True
         self.raw_train = self.original_df.copy()
         self._set_recipe(self.recipe)
 
@@ -521,6 +525,7 @@ class SessionManager:
             "owner": session.owner,
             "clean_only": int(session.clean_only),
             "time_column": session.time_column,
+            "explored_first": int(session.explored_first),
         })
 
     def _load_session(self, session_id: str) -> Optional[DataSession]:
@@ -547,6 +552,7 @@ class SessionManager:
             session.exam_count = row["exam_count"] or 0
             session.owner = row["owner"]
             session.time_column = row.get("time_column")
+            session.explored_first = bool(row.get("explored_first"))
             lines = [Line(s["tool"], s["args"], **({"id": s["id"]} if "id" in s else {}))
                      for s in json.loads(row["recipe"] or "[]")]
 
@@ -576,7 +582,7 @@ class SessionManager:
         """Explicitly save a session."""
         self._persist_session(session)
 
-    def list_sessions(self, limit: int = 20, owner: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_sessions(self, limit: int = 200, owner: Optional[str] = None) -> List[Dict[str, Any]]:
         """Most recently used sessions of `owner`, for the notebook list."""
         if not self._db:
             return []

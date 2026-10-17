@@ -664,6 +664,11 @@ def final_exam(session: DataSession, args: Dict[str, Any]) -> Dict[str, Any]:
     if session.exam_count > 1:
         msg += (f" Note: this is look #{session.exam_count} at the test rows. Every extra look makes this score less "
                 f"trustworthy, because choices start being tuned to the exam.")
+    if session.explored_first:
+        exam["explored_first"] = True
+        msg += (" Note: every row, these test rows included, was explored before they were locked away, so "
+                "choices made while exploring may have been shaped by them: this score may be slightly optimistic. "
+                "For a fully honest score, start a notebook by choosing the column to predict first.")
     return {"success": True, "message": msg, "evidence": {"exam": exam}}
 
 

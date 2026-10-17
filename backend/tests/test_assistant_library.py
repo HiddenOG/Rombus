@@ -61,9 +61,11 @@ def test_catalogue_lists_what_fits_the_notebook_now(session):
     assert "svc" not in text.split("train_models")[1].split("\n")[0]
 
 
-def test_before_the_lock_only_the_start_is_offered():
+def test_before_anything_is_chosen_exploring_is_open_but_models_are_not():
     s = DataSession(pd.DataFrame({"a": [1, 2], "b": [3, 4]}), "x.csv")
-    assert set(library(s)) == {"select_target", "clean_only", "preview_data"}
+    names = set(library(s))
+    assert {"select_target", "clean_only", "impute_missing", "plot_histogram"} <= names
+    assert not names & {"train_models", "final_exam", "predict"}
 
 
 def test_without_code_the_prompt_says_so(session, monkeypatch):
@@ -151,13 +153,13 @@ def test_several_steps_reach_the_notebook_and_its_memory(tmp_path, monkeypatch):
         assert sent[1]["messages"][-2]["content"].count("```step") == 2  # both remembered
 
 
-def test_before_choosing_what_to_do_no_code_is_offered(monkeypatch):
-    """Code can't run until a target is chosen (or clean only): a cell that can only fail isn't offered."""
+def test_before_choosing_the_assistant_helps_freely(monkeypatch):
+    """No forced choice: code is offered, and running it starts explore mode."""
     s = DataSession(pd.DataFrame({"a": range(10), "b": range(10)}), "d.csv")
-    assert "NOTHING IS CHOSEN YET" in system_prompt(s)
+    assert "NOTHING IS CHOSEN YET" in system_prompt(s) and "keeps its final score fully honest" in system_prompt(s)
     fake_ai(monkeypatch, "That's 10 rows.\n```python\nresult = len(train)\n```")
     result = asyncio.run(assistant.assist(s, "how many rows are there?"))
-    assert "code" not in result and result["reply"].startswith("That's 10 rows.") and "first choose" in result["reply"]
+    assert result["code"] == "result = len(train)"
 
 
 def test_clean_only_notebooks_are_told_there_are_no_models():

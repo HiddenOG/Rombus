@@ -127,10 +127,12 @@ function CommandBar({ nb }) {
 
     const [predicting, setPredicting] = useState(false);
     const canPredict = summary?.trained_models?.length > 0 && summary?.raw_features?.length > 0;
-    const available = Object.values(tools).filter(t =>
-        summary?.is_split || t.before_split || (summary?.clean_only && !t.needs_target));
-    // Just uploaded: predict a column (choose the target), or only clean the data
+    // Nothing chosen yet works like exploring: every step but the model ones (the first one starts explore mode)
+    const available = Object.values(tools).filter(t => summary?.is_split || t.before_split || !t.needs_target);
+    // Just uploaded: a suggestion, not a gate. Predict a column, explore & clean, or skip and just start
+    const [skipped, setSkipped] = useState({});
     const choosing = sessionId && summary && !summary.is_split && !summary.clean_only;
+    const suggesting = choosing && !skipped[sessionId];
     const chooseTarget = () => { setToolName('select_target'); setAdding(true); setPredicting(false); };
     const submit = (e) => {
         e.preventDefault();
@@ -152,9 +154,18 @@ function CommandBar({ nb }) {
                     </div>
                 )}
 
-                {choosing && !adding && (
+                {suggesting && !adding && (
                     <div className="rounded-2xl border border-brand-200 bg-brand-50/60 p-3.5 animate-in">
-                        <p className="mb-2.5 text-sm font-semibold text-ink">What would you like to do with this data?</p>
+                        <div className="mb-2.5 flex items-start justify-between gap-3">
+                            <p className="text-sm font-semibold text-ink">What would you like to do with this data?</p>
+                            <button
+                                type="button"
+                                onClick={() => setSkipped(s => ({ ...s, [sessionId]: true }))}
+                                className="shrink-0 rounded-lg px-2 py-0.5 text-xs font-semibold text-ink-3 hover:bg-surface hover:text-ink"
+                            >
+                                Skip for now
+                            </button>
+                        </div>
                         <div className="grid gap-2 sm:grid-cols-2">
                             <StartOption
                                 icon={Target}
@@ -165,12 +176,16 @@ function CommandBar({ nb }) {
                             />
                             <StartOption
                                 icon={Wand2}
-                                title="Just clean the data"
-                                text="No model: every step works on all rows, then export the cleaned table."
+                                title="Explore & clean"
+                                text="No model yet: see every row, chart, clean and export. You can still predict a column later."
                                 onClick={() => nb.run({ tool: 'clean_only', arguments: {} })}
                                 disabled={isProcessing}
                             />
                         </div>
+                        <p className="mt-2 px-1 text-[11px] leading-relaxed text-ink-3">
+                            Or just start: ask a question or run a cell. That explores all rows; if you predict a column
+                            later, its final score notes you'd seen them (choose it first for a fully honest score).
+                        </p>
                         <HeaderRow summary={summary} onApply={nb.setHeaderRow} disabled={isProcessing} />
                     </div>
                 )}
@@ -256,12 +271,12 @@ function CommandBar({ nb }) {
 
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex flex-wrap gap-2">
-                        <QuickButton onClick={() => { nb.addCodeCell('look'); setAdding(false); }} disabled={!sessionId || isProcessing || choosing}>
+                        <QuickButton onClick={() => { nb.addCodeCell('look'); setAdding(false); }} disabled={!sessionId || isProcessing}>
                             <Code2 className="h-3.5 w-3.5" /> Code
                         </QuickButton>
                         <QuickButton
                             onClick={() => nb.assist('Review what I have done so far. Point out mistakes, or anything that could leak information from the target or the test rows. Be brief, and only mention real problems.')}
-                            disabled={!sessionId || isProcessing || choosing}
+                            disabled={!sessionId || isProcessing}
                         >
                             <Sparkles className="h-3.5 w-3.5" /> Review my work
                         </QuickButton>

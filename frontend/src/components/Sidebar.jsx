@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Upload, FileSpreadsheet, Layers, Sparkles, Undo2, Lock, Target, Boxes, NotebookPen, Plus, Trash2, PanelLeftClose } from 'lucide-react';
+import { Upload, FileSpreadsheet, Layers, Sparkles, Undo2, Lock, Target, Boxes, NotebookPen, Plus, Trash2, PanelLeftClose, ChevronRight } from 'lucide-react';
 import { Logo } from './Logo';
 import { ConfirmDialog } from './ConfirmDialog';
 import { AccountPanel } from './AccountPanel';
@@ -74,15 +74,41 @@ function timeAgo(seconds) {
     return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
 }
 
+const FOLD_KEY = 'rhombus.notebooks.folded';
+const SEARCH_FROM = 6; // a search box once there are more notebooks than this
+
 function NotebookList({ notebooks, currentId, onOpen, onNew, onDelete, disabled }) {
     const [pending, setPending] = useState(null); // the notebook waiting for "are you sure?"
     const confirmDelete = (n) => setPending(n);
     const cancel = useCallback(() => setPending(null), []);
+    // Many notebooks: fold the list away, or search it. It scrolls inside its own box either way,
+    // so the dataset cards below never get pushed out of sight
+    const [folded, setFolded] = useState(() => {
+        try { return localStorage.getItem(FOLD_KEY) === '1'; } catch { return false; }
+    });
+    const [query, setQuery] = useState('');
+    const toggle = () => setFolded(f => {
+        try { localStorage.setItem(FOLD_KEY, f ? '0' : '1'); } catch { /* not remembered */ }
+        return !f;
+    });
+    const words = query.trim().toLowerCase();
+    const shown = words ? notebooks.filter(n => `${n.filename} ${n.target || ''}`.toLowerCase().includes(words)) : notebooks;
 
     return (
         <section>
             <div className="mb-2.5 flex items-center justify-between">
-                <SectionTitle icon={NotebookPen}>Notebooks</SectionTitle>
+                <button
+                    type="button"
+                    onClick={toggle}
+                    aria-expanded={!folded}
+                    className="-mt-2.5 flex items-center gap-1 rounded-lg py-1 pr-1.5 text-left hover:text-ink"
+                    title={folded ? 'Show notebooks' : 'Hide notebooks'}
+                >
+                    <ChevronRight className={`h-3.5 w-3.5 text-ink-3 transition-transform ${folded ? '' : 'rotate-90'}`} />
+                    <SectionTitle icon={NotebookPen}>
+                        Notebooks{notebooks.length > 0 && <span className="ml-1 font-normal text-ink-3">· {notebooks.length}</span>}
+                    </SectionTitle>
+                </button>
                 <button
                     onClick={onNew}
                     disabled={disabled}
@@ -91,11 +117,23 @@ function NotebookList({ notebooks, currentId, onOpen, onNew, onDelete, disabled 
                     <Plus className="h-3.5 w-3.5" /> New
                 </button>
             </div>
-            {notebooks.length === 0 ? (
+            {folded ? null : notebooks.length === 0 ? (
                 <p className="text-xs text-ink-3">Your notebooks will appear here.</p>
             ) : (
+                <>
+                {notebooks.length > SEARCH_FROM && (
+                    <input
+                        type="search"
+                        value={query}
+                        onChange={e => setQuery(e.target.value)}
+                        placeholder={`Search ${notebooks.length} notebooks`}
+                        aria-label="Search notebooks"
+                        className="mb-1.5 w-full rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs text-ink outline-none focus:border-brand-300"
+                    />
+                )}
+                {shown.length === 0 && <p className="px-1 text-xs text-ink-3">No notebook matches “{query}”.</p>}
                 <ul className="max-h-44 space-y-0.5 overflow-y-auto custom-scrollbar">
-                    {notebooks.map(n => (
+                    {shown.map(n => (
                         <li key={n.session_id} className="group relative">
                             <button
                                 onClick={() => onOpen(n.session_id)}
@@ -121,6 +159,7 @@ function NotebookList({ notebooks, currentId, onOpen, onNew, onDelete, disabled 
                         </li>
                     ))}
                 </ul>
+                </>
             )}
 
             <ConfirmDialog
@@ -205,7 +244,7 @@ function DatasetOverview({ summary }) {
                         {summary?.target ? (
                             <span className="font-semibold text-brand-700">{summary.target}</span>
                         ) : summary?.clean_only ? (
-                            <span className="font-medium text-ink-2">None: cleaning only</span>
+                            <span className="font-medium text-ink-2">None yet: exploring</span>
                         ) : (
                             <span className="text-ink-3">Not chosen yet</span>
                         )}

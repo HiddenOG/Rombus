@@ -47,6 +47,7 @@ sessions_table = Table(
     Column("owner", String(64)),
     Column("clean_only", Integer),
     Column("time_column", Text),
+    Column("explored_first", Integer),
 )
 
 

@@ -30,13 +30,20 @@ class TestBeforeLock:
         col = session.get_summary()["columns"][1]
         assert col == {"name": "age", "dtype": "int64"}
 
-    def test_cleaning_blocked(self, session):
+    def test_cleaning_without_choosing_starts_explore_mode(self, session):
+        """No forced choice: cleaning before picking a target explores all rows, and that's remembered
+        (a later final exam says the test rows were seen)."""
         result = execute_tool("impute_all_missing", session, {})
-        assert not result["success"]
-        assert "column to predict" in result["message"] and "Clean only" in result["message"]
+        assert result["success"] and result["message"].startswith("(Exploring all rows")
+        assert session.clean_only and session.explored_first and not session.is_split
 
-    def test_charts_blocked(self, session):
-        assert not execute_tool("plot_histogram", session, {"column": "age"})["success"]
+    def test_charts_without_choosing_start_explore_mode(self, session):
+        assert execute_tool("plot_histogram", session, {"column": "age"})["success"]
+        assert session.explored_first
+
+    def test_models_still_need_a_target(self, session):
+        result = execute_tool("train_models", session, {})
+        assert not result["success"] and "column to predict" in result["message"]
 
     def test_preview_capped(self, session):
         result = execute_tool("preview_data", session, {"rows": 50})

@@ -85,12 +85,20 @@ def execute_tool(tool_name: str, session: DataSession, args: Dict[str, Any]) -> 
                            "the column to predict with Select target: your cleaning steps are kept and "
                            "replayed on the training rows.",
             }
-        return {
-            "success": False,
-            "message": "First choose what to do: pick the column to predict (Select target, which locks away "
-                       "the test rows), or Clean only, to clean the data without a model. Until then you can "
-                       "only preview a few rows.",
-        }
+        if tool_name in NEEDS_TARGET:
+            return {
+                "success": False,
+                "message": "Models need a column to predict: choose it with Predict a column (Select target), "
+                           "which locks away the test rows first so the final score is honest.",
+            }
+        # Nothing chosen yet, and they've started working: that's exploring. No gate, but the notebook
+        # remembers it (a later final exam says the test rows were seen while exploring)
+        session.start_clean_only()
+        result = execute_tool(tool_name, session, args)
+        result["message"] = ("(Exploring all rows: no column to predict yet. You can still choose one later.) "
+                             + str(result.get("message", "")))
+        result["started_exploring"] = True
+        return result
 
     if tool_name in ("custom_view", "custom_code", "custom_models"):
         from app.sandbox import not_allowed
