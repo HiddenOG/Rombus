@@ -272,10 +272,12 @@ export function RunCell({ cell, number, tool, step, summary, sessionId, isProces
                     )}
 
                     {(step?.code || !isStep) && (
-                        <div className="flex gap-1 border-b border-line">
+                        <div role="tablist" className="flex gap-1 border-b border-line">
                             {['result', 'code'].map(t => (
                                 <button
                                     key={t}
+                                    role="tab"
+                                    aria-selected={tab === t}
                                     onClick={() => openTab(t)}
                                     className={`-mb-px border-b-2 px-2.5 py-1.5 text-xs font-semibold capitalize transition-colors ${
                                         tab === t ? 'border-brand-500 text-ink' : 'border-transparent text-ink-3 hover:text-ink-2'

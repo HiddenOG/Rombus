@@ -113,7 +113,7 @@ def execute_tool(tool_name: str, session: DataSession, args: Dict[str, Any]) -> 
 
     try:
         args = _typed(tool_name, args)
-        return TOOL_REGISTRY[tool_name](session, args)
+        return _with_column_order(TOOL_REGISTRY[tool_name](session, args))
     except ValueError as e:
         # Our own validation errors (bad column name, test size out of range) are user-facing
         return {"success": False, "message": str(e)}
@@ -124,6 +124,16 @@ def execute_tool(tool_name: str, session: DataSession, args: Dict[str, Any]) -> 
             "message": f"Something went wrong while running '{tool_name}'. "
                        "The details were logged on the server; try different settings or undo the last step.",
         }
+
+
+def _with_column_order(result: Dict[str, Any]) -> Dict[str, Any]:
+    """A table's columns in their real order, sent alongside it: a browser lists number-like keys ("1", "2")
+    before the others whatever order they came in, so a pivot table's row labels would end up last."""
+    evidence = result.get("evidence") if isinstance(result, dict) else None
+    preview = evidence.get("preview") if isinstance(evidence, dict) else None
+    if preview and isinstance(preview, list) and isinstance(preview[0], dict):
+        evidence.setdefault("preview_columns", list(preview[0]))
+    return result
 
 
 def _typed(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:

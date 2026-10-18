@@ -13,7 +13,7 @@ export function EvidenceCard({ evidence }) {
         <div className="mt-4 max-w-full space-y-3">
             {evidence.chart_type && <ChartRenderer evidence={evidence} />}
 
-            {evidence.preview && <PreviewTable data={evidence.preview} />}
+            {evidence.preview && <PreviewTable data={evidence.preview} columns={evidence.preview_columns} />}
 
             {evidence.output && (
                 <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-xl border border-line bg-surface-2 p-3 font-mono text-[12px] leading-relaxed text-ink">
@@ -74,9 +74,10 @@ export function EvidenceCard({ evidence }) {
 const tableShell = 'max-h-80 overflow-auto rounded-xl border border-line bg-surface';
 const th = 'sticky top-0 z-10 bg-surface-2 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-3 whitespace-nowrap';
 
-function PreviewTable({ data }) {
+function PreviewTable({ data, columns }) {
     if (!data?.length) return null;
-    const headers = Object.keys(data[0] || {});
+    // The server's order: the browser moves number-like names ("1", "2") to the front of a row's keys
+    const headers = columns?.length ? columns : Object.keys(data[0] || {});
 
     return (
         <div className={tableShell}>

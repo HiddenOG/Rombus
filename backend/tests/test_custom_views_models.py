@@ -53,6 +53,13 @@ class TestViews:
         result = run(session, "custom_view", code=info["template"])
         assert result.get("evidence"), f"{tool}'s code showed nothing"
 
+    def test_a_table_keeps_its_column_order_when_names_are_numbers(self, session):
+        """The browser would list "1", "2"… before "plan": the real order is sent with the table."""
+        session.df["tier"] = (session.df["visits"] // 10 + 1).astype(int)
+        evidence = run(session, "pivot_table", rows="plan", columns="tier", value="age")["evidence"]
+        assert evidence["preview_columns"][0] == "plan"
+        assert evidence["preview_columns"] == list(evidence["preview"][0])
+
     def test_numeric_histogram_code_matches_the_app(self, session):
         info = code_info(session, "plot_histogram", {"column": "age"})
         table = run(session, "custom_view", code=info["template"])["evidence"]["preview"]
